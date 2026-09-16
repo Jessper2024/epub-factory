@@ -12,7 +12,11 @@
 ~/Life/EPUB制作/              项目根（数据）
 ├─ _engine/                   本目录：代码
 │   ├─ 成书.command           双击就跑（收件箱 → 成书 → 体检 → 回归）
+│   ├─ 看板.command           双击就开看板（没在跑会后台起服务）
 │   ├─ epub.sh                唯一入口
+│   ├─ dashboard.py           常驻看板服务（本地 127.0.0.1:8760）
+│   ├─ dash_service.sh        看板启停/状态/登录自启
+│   ├─ report.py              报表页面生成（看板与 `_报表.html` 共用）
 │   ├─ build_epub.py          合订主脚本（识别博主 → 分册/分章 → 三级目录 → 打包 → 报告 → 台账）
 │   ├─ check_epub.py          交付前体检
 │   ├─ regress.py             回归比对（防改坏）
@@ -49,16 +53,44 @@ cd ~/Life/EPUB制作/_engine
 ./epub.sh add a.html      # 归档指定文件并重建（原文件保留）
 ./epub.sh list            # 只看扫描结果
 ./epub.sh check           # 交付前体检：源 xhtml + EPUB 双向校验
-./epub.sh report          # 生成报表页面 _报表.html（总览/各号/全部文章/推广图）
+./epub.sh report          # 生成一次报表页面 _报表.html（总览/各号/全部文章/推广图）
+./epub.sh dash            # 开看板：http://127.0.0.1:8760（没在跑就起服务）
+./epub.sh dash status     # 看板在不在跑
+./epub.sh dash install    # 装成登录自启（开机就有，看板常驻）
+./epub.sh dash stop       # 停掉看板
+./epub.sh dash uninstall  # 取消登录自启
 ./epub.sh test            # 回归：和基线比对，看有没有改坏
 ./epub.sh test --save     # 确认改动是有意的，重存基线
 ./epub.sh split           # 按年分册（书太大时用）
 ./epub.sh toc 猫刀笔/猫刀笔_202608-202609.epub   # 打印三级目录树
 ```
 
-**不想碰终端**：双击 `成书.command`，跑完自动打开项目文件夹。
+**不想碰终端**：双击 `成书.command`（跑完自动打开项目文件夹）；想看运行情况就双击 `看板.command`。
 
 `epub.sh` 自动用 `_engine/.venv`；找不到才回退系统 `python3`。
+
+## 看板：随时看运行情况
+
+打开 http://127.0.0.1:8760/ 就是项目当前状态（双击 `看板.command` 最快，会自动开浏览器）。
+页面每 60 秒自动刷新，也可点「立即刷新」强制重扫；服务只监听本机，数据不出网。
+
+看板与 `_报表.html` 由同一个 `report.py` 渲染，区别是**看板是实时扫描**：总览数字、健康状态、
+月度柱图、各号卡片（封面/篇数/体积/月度分布）、全部文章可搜索表格、推广图三类名单、
+最近动态、最近一次处理报告。
+
+改了 `promo.py` / `build_epub.py` / `report.py` **不用重启看板**，它会自己热重载
+（服务日志里会打「检测到脚本改动，已热重载」）。只有改 `dashboard.py` 本身才需要重启。
+
+想要开机就有（不必每次双击）：
+
+```bash
+./epub.sh dash install     # 装成登录自启
+./epub.sh dash status      # 看状态
+./epub.sh dash uninstall   # 取消
+```
+
+`install` 要在**普通终端**里跑（launchd 在受限/沙箱环境下会被拒）。不装也行——
+要看的时候双击 `看板.command`；服务是脱离终端跑的，关掉那个窗口它还在。
 
 ## 每次运行都会留痕
 
@@ -88,8 +120,11 @@ cd ~/Life/EPUB制作/_engine
 ## 规则速查
 
 - **目录层级**：h1 = 月份，h2 = 「日期：标题」，h3 = 文内小标题；从旧到新排序；三级目录 nav + ncx 都写。
-- **源文件也要规范**：打包前 `tidy_sources()` 就地改写 `xhtml/`，标题 h1 唯一，真小标题 h3，
-  空/超 40 字/以 `[` 开头（参考文献）/图注一律降 `<p>`。合订侧 h3 不再降级。
+- **小标题判定只有一处**：`normalize_headings()`，被 `parse_article()`（合订）和 `tidy_sources()`
+  （写回源文件）共用——**改标题规则只改这里**。规则：h1/h2 → h3，空的/超 40 字/以 `[` 开头的
+  （参考文献）/图注降回 `<p>`；漏判的序号小标题（`<p>01</p>`）抬成 h3。
+- **源文件也要规范**：打包前 `tidy_sources()` 就地改写 `xhtml/`，让 Sigil 里打开的源文件和
+  合订出的 EPUB 目录**完全一致**（幂等，重复跑 0 改动）。
 - **元数据**：`dc:creator` = 公众号博主名，排序作者恒为「沪上陈少」。
 - **去推广图（会自己学）**：`promo.py` 给每篇的图片记账；跨文章重复出现在文末的自动升为候选，
   人工看图确认后永久删除（`./epub.sh ads` 看名单，`--promote-all` 转正）。

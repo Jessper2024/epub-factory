@@ -61,7 +61,11 @@ def scan_account(book: Path) -> dict:
             "author": a.author or "",
             "chars": len(text),
             "images": sum(len(n.xpath('.//*[local-name()="img"]')) for n in a.nodes),
-            "sections": len(a.subsections),
+            # 小标题要数正文里的 h3：Article.subsections 只在打包过程中才被填充，
+            # parse_article 之后永远是空的（数它就永远是 0）。
+            "sections": sum(1 for n in a.nodes for sub in n.iter()
+                            if isinstance(sub.tag, str)
+                            and sub.tag.split("}")[-1] == "h3"),
         })
     arts.sort(key=lambda x: (x["date"], x["title"]))
     raw_dir = book / B.RAW_SUBDIR
@@ -116,7 +120,26 @@ def svg_bars(pairs: list[tuple[str, int]], height: int = 90, color: str = "#3B6D
             f'role="img">{"".join(bars)}</svg>')
 
 
-def build_html(accounts: list[dict], now: str) -> str:
+def recent_activity(limit: int = 8) -> list[tuple[str, str]]:
+    """最近动态：git 提交记录（跑不通就返回空，不影响报表）。"""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "log", "--pretty=%ad|%s", "--date=format:%m-%d %H:%M", "-n", str(limit)],
+            cwd=str(Path(__file__).resolve().parent),
+            capture_output=True, text=True, timeout=10)
+        rows = []
+        for line in out.stdout.strip().splitlines():
+            if "|" in line:
+                t, s = line.split("|", 1)
+                rows.append((t, s))
+        return rows
+    except Exception:
+        return []
+
+
+def build_html(accounts: list[dict], now: str, live: bool = False,
+               refresh_sec: int = 60) -> str:
     total_arts = sum(a["xhtml_count"] for a in accounts)
     total_raw = sum(a["raw_count"] for a in accounts)
     total_epub = sum(len(a["epubs"]) for a in accounts)
@@ -141,6 +164,9 @@ def build_html(accounts: list[dict], now: str) -> str:
     rej = sorted([(k, v) for k, v in plist.items() if v.get("rejected")],
                  key=lambda x: -x[1].get("count", 0))
 
+    # 只有旧 epub、没有 xhtml 源的号（健康状态里要点名）
+    missing_src = [a["account"] for a in accounts if not a["xhtml_count"]]
+
     # 回归
     base_file = R.BASE_FILE
     regress_state, regress_detail = "未建立基线", "先跑 ./epub.sh test --save"
@@ -158,6 +184,13 @@ def build_html(accounts: list[dict], now: str) -> str:
     # 处理报告
     rp = ROOT / "_处理报告.md"
     report_text = rp.read_text(encoding="utf-8") if rp.exists() else "（还没跑过）"
+
+    # 最近动态（代码改动记录）
+    acts = recent_activity()
+    activity_html = ("".join(
+        f'<div class="promo"><span class="mono">{html.escape(t)}</span>'
+        f'<span>{html.escape(s)}</span></div>' for t, s in acts)
+        or '<div class="muted">（读不到 git 记录）</div>')
 
     cards = [
         ("文章总数", total_arts, "篇（= 已归档 XHTML）"),
@@ -236,7 +269,8 @@ def build_html(accounts: list[dict], now: str) -> str:
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>成书报表 · {now}</title>
+{('<meta http-equiv="refresh" content="%d"/>' % refresh_sec) if live else ''}
+<title>成书看板 · {now}</title>
 <style>
   :root {{
     --bg: #F7F6F3; --card: #FFFFFF; --line: #E4E2DC; --text: #2C2C2A;
@@ -249,6 +283,7 @@ def build_html(accounts: list[dict], now: str) -> str:
   header h1 {{ margin: 0; font-size: 19px; font-weight: 500; }}
   header .meta {{ margin-top: 6px; font-size: 12px; color: #B4B2A9; }}
   header .meta code {{ background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 4px; }}
+  header .refresh {{ color: #9FE1CB; text-decoration: none; border-bottom: 1px dashed #5DCAA5; }}
   main {{ max-width: 1120px; margin: 0 auto; padding: 22px 20px 60px; }}
   h2 {{ font-size: 15px; font-weight: 500; margin: 30px 0 12px; }}
   .grid {{ display: grid; gap: 12px; }}
@@ -289,9 +324,12 @@ def build_html(accounts: list[dict], now: str) -> str:
 </head>
 <body>
 <header>
-  <h1>成书报表</h1>
-  <div class="meta">生成于 {now}　·　刷新：<code>cd ~/Life/EPUB制作/_engine &amp;&amp; ./epub.sh report</code>
-  　·　数据来自磁盘实际扫描</div>
+  <h1>成书{('看板' if live else '报表')}</h1>
+  <div class="meta">
+    {('实时扫描 · 每 %d 秒自动刷新 · 本页生成于 %s' % (refresh_sec, now)) if live else ('生成于 %s　·　刷新：<code>cd ~/Life/EPUB制作/_engine &amp;&amp; ./epub.sh report</code>' % now)}
+    　·　数据来自磁盘实际扫描
+    {('　·　<a class="refresh" href="/refresh">立即刷新</a>') if live else ''}
+  </div>
 </header>
 <main>
 
@@ -311,9 +349,9 @@ def build_html(accounts: list[dict], now: str) -> str:
       <div class="muted">跨文章重复出现在文末的图会自动进候选，看图确认后再删</div>
     </div>
     <div class="card">
-      <h4><span class="dot ok"></span>缺源的书</h4>
-      <div>{sum(1 for a in accounts if not a["xhtml_count"])} 个号没有 XHTML 源</div>
-      <div class="muted">只有旧 epub、没有源，无法重建（如王阿三 / 阿马有你真好）</div>
+      <h4><span class="dot {'warn' if missing_src else 'ok'}"></span>缺源的书</h4>
+      <div>{len(missing_src)} 个号没有 XHTML 源</div>
+      <div class="muted">{('、'.join(missing_src) + ' 只有旧 epub、没有源，无法跟着规则升级（跑拆解流程补齐）') if missing_src else '每个号都有 XHTML 源，随时可以从源重建'}</div>
     </div>
   </div>
 
@@ -337,6 +375,9 @@ def build_html(accounts: list[dict], now: str) -> str:
     <div class="card"><h4 style="margin:0 0 8px;font-size:13px">待确认（{len(cands)}）</h4>{promo_row(sorted(cands.items(), key=lambda x: -x[1].get('count', 0)))}</div>
   </div>
   <div class="card" style="margin-top:12px"><h4 style="margin:0 0 8px;font-size:13px">已排除（{len(rej)}，人工看过不是推广图，永不删除）</h4>{promo_row(rej)}</div>
+
+  <h2>最近动态</h2>
+  <div class="card">{activity_html}</div>
 
   <h2>最近一次处理报告</h2>
   <pre>{html.escape(report_text)}</pre>

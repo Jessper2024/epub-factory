@@ -186,6 +186,67 @@ BLOCK_TAGS = {"p", "div", "section", "article", "blockquote", "ul", "ol", "li",
               "table", "pre", "h1", "h2", "h3", "h4", "h5", "h6"}
 
 
+def normalize_headings(nodes: list) -> int:
+    """把正文块的小标题统一成 h3，返回真正改动的块数。
+
+    parse_article（在内存里改，供合订）和 tidy_sources（写回源文件）共用这一份判定。
+    两边必须走同一套规则，否则会出现「EPUB 目录里有 01/02/03，源文件里却是 <p>」这种
+    源文件与成品对不上的情况。
+
+    三步：
+      1. 图注不进目录——紧跟图片之后的短文本块打内部标记；
+      2. h1/h2 统一成 h3；空的、超长的、以 `[` 开头的（参考文献）、图注，一律降回 <p>；
+      3. 补救提升——转换器漏判的序号小标题（纯文本块 `<p>01</p>`）抬成 h3。
+    """
+    changed = 0
+
+    # 1) 图注不进目录：紧跟在图片块之后的短文本块（如「90年代广州街景」）
+    prev_has_img = False
+    for node in nodes:
+        has_img = bool(node.xpath('.//*[local-name()="img"]'))
+        if prev_has_img and not has_img:
+            text = "".join(node.itertext()).strip()
+            if text and len(text) <= 20 and not looks_like_heading(text):
+                node.set("data-caption", "1")
+        prev_has_img = has_img
+
+    # 2) h1/h2 → h3，不合格的降回 <p>
+    for node in nodes:
+        for sub in node.iter():
+            if lname(sub) not in ("h1", "h2"):
+                continue
+            text = "".join(sub.itertext()).strip()
+            is_caption = bool(sub.xpath('ancestor-or-self::*[@data-caption]'))
+            new = "p" if (not text or len(text) > MAX_HEADING_LEN
+                          or text.startswith("[") or is_caption) else "h3"
+            if lname(sub) != new:
+                sub.tag = f"{{{XHTML_NS}}}{new}"
+                changed += 1
+
+    # 3) 补救：转换器漏判的序号小标题（纯文本块，没有 h 标签）
+    for node in list(nodes):
+        for sub in list(node.iter()):
+            if lname(sub) not in ("p", "section", "div"):
+                continue
+            if any(lname(c) in BLOCK_TAGS for c in sub):
+                continue
+            if sub.xpath('.//*[local-name()="img"]'):
+                continue
+            if sub.xpath('ancestor-or-self::*[@data-caption]'):
+                continue
+            if looks_like_heading("".join(sub.itertext()).strip()):
+                sub.tag = f"{{{XHTML_NS}}}h3"
+                changed += 1
+
+    # 4) 清掉内部标记，别漏进 EPUB，也别留在源文件里
+    for node in nodes:
+        for sub in list(node.iter()):
+            if sub.get("data-caption") is not None:
+                del sub.attrib["data-caption"]
+
+    return changed
+
+
 class Article:
     __slots__ = ("path", "date", "title", "account", "author", "nodes", "subsections")
 
@@ -298,52 +359,9 @@ def parse_article(path: Path) -> Article | None:
     if not author:
         author = m_author
 
-    # 图注不进目录：紧跟在图片块之后的短文本块（如「90年代广州街景」）
-    prev_has_img = False
-    for node in nodes:
-        has_img = bool(node.xpath('.//*[local-name()="img"]'))
-        if prev_has_img and not has_img:
-            text = "".join(node.itertext()).strip()
-            if text and len(text) <= 20 and not looks_like_heading(text):
-                node.set("data-caption", "1")
-        prev_has_img = has_img
-
-    # 正文里的小标题统一成 h3（文内子标题 h3→h4）。
-    # 空的、或者过长的（被引擎误判成标题的正文段落）降级回 <p>，
-    # 否则目录里会出现空白条目或一整段正文。
-    for node in nodes:
-        for sub in node.iter():
-            t = lname(sub)
-            if t in ("h1", "h2"):
-                text = "".join(sub.itertext()).strip()
-                is_caption = bool(sub.xpath('ancestor-or-self::*[@data-caption]'))
-                if (not text or len(text) > MAX_HEADING_LEN
-                        or text.startswith("[") or is_caption):
-                    sub.tag = f"{{{XHTML_NS}}}p"
-                else:
-                    sub.tag = f"{{{XHTML_NS}}}h3"
-            # h3 保持不动：源文件里已经规范成 h3 的小标题直接采用
-
-    # 补救：转换器漏判的序号小标题（纯文本块，没有 h 标签）
-    for node in list(nodes):
-        for sub in list(node.iter()):
-            if lname(sub) not in ("p", "section", "div"):
-                continue
-            if any(lname(c) in BLOCK_TAGS for c in sub):
-                continue
-            if sub.xpath('.//*[local-name()="img"]'):
-                continue
-            if sub.xpath('ancestor-or-self::*[@data-caption]'):
-                continue
-            text = "".join(sub.itertext()).strip()
-            if looks_like_heading(text):
-                sub.tag = f"{{{XHTML_NS}}}h3"
-
-    # 清掉内部标记，别漏进 EPUB
-    for node in nodes:
-        for sub in list(node.iter()):
-            if sub.get("data-caption") is not None:
-                del sub.attrib["data-caption"]
+    # 小标题规范化：与 tidy_sources 共用同一套判定，
+    # 保证「源文件在 Sigil 里看到的」和「合订出的 EPUB 目录」完全一致。
+    normalize_headings(nodes)
 
     return Article(path, date, title, account, author, nodes)
 
@@ -903,35 +921,10 @@ def tidy_sources(book_dir: Path) -> int:
         if body is None:
             continue
         first_h1 = next((el for el in body if lname(el) == "h1"), None)
-        changed = 0
-        # 图注不进目录：紧跟图片之后的短文本块
-        prev_has_img = False
-        captions = set()
-        for el in body:
-            has_img = bool(el.xpath('.//*[local-name()="img"]'))
-            if prev_has_img and not has_img:
-                text = "".join(el.itertext()).strip()
-                if text and len(text) <= 20 and not looks_like_heading(text):
-                    el.set("data-caption", "1")
-            prev_has_img = has_img
-
-        for el in list(body.iter()):
-            t = lname(el)
-            if t not in ("h1", "h2"):
-                continue
-            if el is first_h1:          # 文章标题不动
-                continue
-            text = "".join(el.itertext()).strip()
-            is_caption = bool(el.xpath('ancestor-or-self::*[@data-caption]'))
-            if (not text or len(text) > MAX_HEADING_LEN
-                    or text.startswith("[") or is_caption):
-                el.tag = f"{{{XHTML_NS}}}p"
-            else:
-                el.tag = f"{{{XHTML_NS}}}h3"
-            changed += 1
-        for el in body.iter():
-            if el.get("data-caption") is not None:
-                del el.attrib["data-caption"]
+        # 与 parse_article 一样，把首个 h1（文章标题）和 meta 行排除在正文之外
+        nodes = [el for el in body
+                 if el is not first_h1 and (el.get("class") or "") != "article-meta"]
+        changed = normalize_headings(nodes)
         if changed:
             tree.write(str(path), encoding="UTF-8", xml_declaration=True)
             log("  规范化 %s：%d 处" % (path.name[:40], changed))

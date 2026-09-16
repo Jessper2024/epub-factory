@@ -7,6 +7,7 @@
 #   ./epub.sh list        只看扫描结果，不打包
 #   ./epub.sh check       交付前体检（源 xhtml + EPUB 双向校验）
 #   ./epub.sh toc 文件.epub  打印三级目录树
+#   ./epub.sh dash        常驻看板（本机 http://127.0.0.1:8760，随时看运行情况）
 #   ./epub.sh report      生成报表页面 _报表.html
 #   ./epub.sh ads         查看/维护推广图黑名单
 #   ./epub.sh backfill    给已归档的 HTML 补记图片账
@@ -18,7 +19,7 @@ PY="$ENGINE/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
 usage() {
-  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -37,6 +38,7 @@ case "$cmd" in
   ads)   exec "$PY" "$ENGINE/promo.py" "$@" ;;
   backfill) exec "$PY" "$ENGINE/build_epub.py" --backfill-ads ;;
   report) exec "$PY" "$ENGINE/report.py" ;;
+  dash)  exec "$ENGINE/dash_service.sh" "$@" ;;
   sync)  cd "$ENGINE" || exit 1
          git add -A
          if git diff --cached --quiet; then echo "没有改动，无需同步"; exit 0; fi
