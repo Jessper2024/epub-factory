@@ -988,7 +988,7 @@ def _article_title_from_path(input_path: Path) -> str:
 
     try:
         raw = input_path.read_bytes()
-        source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8"))
+        source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8", huge_tree=True))
         return _article_title_from_source(source)
     except Exception:  # noqa: BLE001 - conversion reports the detailed error later
         return input_path.stem or "Article"
@@ -999,7 +999,7 @@ def _filename_title_from_path(input_path: Path, process_type: str = "wechat") ->
 
     try:
         raw = input_path.read_bytes()
-        source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8"))
+        source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8", huge_tree=True))
         return _filename_title_from_source(source, _process_type(process_type))
     except Exception:  # noqa: BLE001 - conversion reports the detailed error later
         return input_path.stem or "Article"
@@ -1818,7 +1818,7 @@ def convert(
 ) -> tuple[int, int, str]:
     process_type = _process_type(process_type)
     raw = input_path.read_bytes()
-    source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8"))
+    source = html.fromstring(raw, parser=html.HTMLParser(encoding="utf-8", huge_tree=True))
     article = _select_article(source, process_type)
 
     if process_type == "javbus":

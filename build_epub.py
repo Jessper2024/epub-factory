@@ -380,7 +380,7 @@ def strip_promo_from_html(src: Path) -> tuple[Path, int, list]:
     """
     from lxml import html as LH
     raw = src.read_bytes()
-    tree = LH.fromstring(raw, parser=LH.HTMLParser(encoding="utf-8"))
+    tree = LH.fromstring(raw, parser=LH.HTMLParser(encoding="utf-8", huge_tree=True))
     # 微信 HTML 里有 <o:p> 等 Office 命名空间残留，重新序列化会变成非法标签
     # （下游 etree.QName 直接抛 ValueError），先清掉。
     junk = [el for el in tree.iter()
@@ -409,20 +409,89 @@ def strip_promo_from_html(src: Path) -> tuple[Path, int, list]:
     return Path(tmp), removed, entries
 
 
+# 公众号 biz（唯一 ID）。老快照常常没有 js_name，但 biz 一定在——
+# 号名能改，biz 不能，所以它比号名可靠。2026-09-17 靠它救回 14 篇"未识别"的晚点文章。
+_BIZ_RE = re.compile(r'biz:\s*""\s*\|\|\s*"([A-Za-z0-9=+/]+)"')
+_BIZ_URL_RE = re.compile(r"__biz=([A-Za-z0-9=+/]+)")
+BIZ_MAP_FILE = ROOT / "_号biz映射.json"
+
+
+def biz_of(path: Path) -> str:
+    """抽 biz。只读前 300KB——biz 一定在 head 里，没必要读整个几十 MB 的快照。"""
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read(300_000).decode("utf-8", "ignore")
+    except Exception:
+        return ""
+    m = _BIZ_RE.search(text) or _BIZ_URL_RE.search(text)
+    return m.group(1) if m else ""
+
+
+def load_biz_map() -> dict:
+    """{biz: 号名}。持久化在 _号biz映射.json——原 HTML 删掉之后就没法学了，必须落盘。"""
+    try:
+        if BIZ_MAP_FILE.exists():
+            data = json.loads(BIZ_MAP_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def build_biz_map() -> dict:
+    """从各号 原始HTML/ 学出 {biz: 号名}，与已有表合并后落盘。
+
+    只在还有原始 HTML 的时候能学——所以删原件之前必须跑一次。
+    """
+    out = load_biz_map()
+    for book in collect_book_dirs():
+        raw = book / RAW_SUBDIR
+        if not raw.is_dir():
+            continue
+        for f in raw.rglob("*.htm*"):
+            b = biz_of(f)
+            if b:
+                out.setdefault(b, book.name)
+    save_biz_map(out)
+    return out
+
+
+def save_biz_map(mapping: dict) -> None:
+    try:
+        BIZ_MAP_FILE.write_text(json.dumps(mapping, ensure_ascii=False, indent=1),
+                                encoding="utf-8")
+    except OSError as exc:
+        log("biz 映射表保存失败：", exc)
+
+
+def register_biz(path: Path, account: str) -> None:
+    """归档时把这个文件的 biz 记到映射表里，以后同号的老快照也能认出来。"""
+    b = biz_of(path)
+    if not b or not account:
+        return
+    m = load_biz_map()
+    if m.get(b) != account:
+        m[b] = account
+        save_biz_map(m)
+
+
 def detect_account_from_html(path: Path) -> str:
-    """给未转换的微信 HTML，用 sigi_convert 的字段取公众号名。"""
+    """给未转换的微信 HTML 定公众号名。
+
+    顺序：js_name（最直接）→ biz 映射（老快照靠它）→ 空（交给调用方兜底）。
+    """
     try:
         sys.path.insert(0, str(SIGI_DIR))
         import sigi_convert as S
         from lxml import html as LH
-        src = LH.fromstring(path.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+        src = LH.fromstring(path.read_bytes(), parser=LH.HTMLParser(encoding="utf-8", huge_tree=True))
         for eid in ("js_name", "js_author_name_text", "js_author_name"):
             val = S._first_text_by_id(src, eid)
             if val:
                 return val.strip()
     except Exception as exc:
         log("  识别公众号失败：", exc)
-    return ""
+    return load_biz_map().get(biz_of(path), "")
 
 
 def detect_account_from_xhtml(path: Path) -> str:
@@ -722,7 +791,7 @@ def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | 
 STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
                "promo_candidates": [], "held": [],
                "harvested": [], "non_wechat": [], "dup_fp": [], "cleanable": [],
-               "pending_accounts": []}
+               "pending_accounts": [], "dup_title": []}
 
 # 认「这是不是微信公众号文章」的两个特征（正文容器 / 微信图床）
 WECHAT_MARKS = ('id="js_content"', "mmbiz.qpic.cn")
@@ -793,16 +862,106 @@ def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
     return touched
 
 
+_OFFICE_TAG_RE = re.compile(r"</?[a-zA-Z]+:[a-zA-Z]+[^>]*>")
+
+
+def sanitize_office_markup(path: Path) -> int:
+    """去掉 Word 粘贴残留的命名空间标签（<o:p>、<w:sdt> 之类）。
+
+    lxml 的 HTML 解析器碰到它们会直接抛 `ValueError: Invalid tag name 'o:p'`，
+    整篇文章就转不了（2026-09-17 实测：深网腾讯新闻那篇）。
+    这些标签本身没有排版意义，删掉不影响正文。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return 0
+    cleaned = _OFFICE_TAG_RE.sub("", text)
+    if cleaned == text:
+        return 0
+    try:
+        path.write_text(cleaned, encoding="utf-8")
+    except OSError as exc:
+        log("  Office 标签清理失败：", exc)
+        return 0
+    return text.count("<o:") + text.count("</o:")
+
+
+# 转换结果小于这个字节数就当空壳拒收（正常文章再短也有几 KB）
+MIN_XHTML_BYTES = 3000
+
+
+def _cfg_bool(key: str, default: bool) -> bool:
+    """读 core 配置里的开关。core 是基础层，业务用它没问题（反过来才禁止）。"""
+    try:
+        from core import config
+        return bool(config.get(key, default))
+    except Exception:
+        return default
+
+
+def _norm_title(t: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", t or "").lower()
+
+
+def find_duplicate_title(title: str) -> str:
+    """已有 xhtml 里有没有同名文章。
+
+    老快照常常没有 og:url 也没有 var ct，两个判重指纹都算不出来，指纹查重会漏
+    （2026-09-17 实测：陈睿那两篇就是这样）。这时候只能靠标题兜底——
+    标题归一化后相同，几乎必然是同一篇的另一个快照。
+    """
+    key = _norm_title(title)
+    if not key:
+        return ""
+    for book in collect_book_dirs():
+        xd = book / XHTML_SUBDIR
+        if not xd.is_dir():
+            continue
+        for f in xd.glob("*.xhtml"):
+            stem = f.name[:-len("-Sigil.xhtml")] if f.name.endswith("-Sigil.xhtml") else f.stem
+            seg = stem.split("_")
+            t = "_".join(seg[3:]) if len(seg) > 3 else (seg[2] if len(seg) > 2 else seg[-1])
+            if _norm_title(t) == key:
+                return "%s/%s" % (book.name, f.name)
+    return ""
+
+
+def register_fingerprints(path: Path, where: str) -> int:
+    """把一篇的判重指纹**增量**写进指纹表。
+
+    原 HTML 删掉之后就再也算不出指纹了，所以必须在转换成功的当下登记。
+    表是累积的：只加不减，绝不因为某次扫到的文件少就把历史指纹冲掉。
+    """
+    keys = content_fingerprints(path)
+    if not keys:
+        return 0
+    idx: dict = {}
+    if FP_FILE.exists():
+        try:
+            idx = json.loads(FP_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            idx = {}
+    added = 0
+    for k in keys:
+        if k not in idx:
+            idx[k] = where
+            added += 1
+    if added:
+        try:
+            FP_FILE.write_text(json.dumps(idx, ensure_ascii=False, indent=1),
+                               encoding="utf-8")
+        except OSError as exc:
+            log("指纹表写入失败：", exc)
+    return added
+
+
 def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> None:
     """处理单个文件：识别号 → 转 XHTML → 归档 → 备份原 HTML。"""
     suffix = p.suffix.lower()
     if suffix in (".html", ".htm"):
-        account = detect_account_from_html(p)
-        if not account:
-            STATS["skipped"].append("%s（认不出公众号）" % p.name)
-            log("无法识别公众号，跳过：", p.name)
-            return
-        if not account_allowed(account):
+        account = detect_account_from_html(p) or "未识别号"
+        if not account_allowed(account) and not _cfg_bool("auto_allow_new_accounts", True):
             STATS["pending_accounts"].append("%s（识别为「%s」）" % (p.name, account))
             hold = PENDING_DIR / safe_stem(account) / p.name
             if hold.exists():
@@ -819,7 +978,7 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
         sys.path.insert(0, str(SIGI_DIR))
         import sigi_convert as S
         from lxml import html as LH
-        src = LH.fromstring(p.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+        src = LH.fromstring(p.read_bytes(), parser=LH.HTMLParser(encoding="utf-8", huge_tree=True))
         title = S._article_title_from_source(src)
         date_text, base = title.split("_", 1) if "_" in title else ("", title)
         author = S._first_text_by_id(src, "js_author_name") or S._author_from_source(src)
@@ -827,12 +986,25 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
         target_dir = source_dir(dest_dir)
         converted = False
         dest = target_dir / (S.output_stem_for_title(stem) + "-Sigil.xhtml")
+        dup = find_duplicate_title(base)
+        if dup:
+            # 老快照没有 og:url / var ct，两个判重指纹都算不出来，指纹查重会漏
+            # （2026-09-17 实测：陈睿那两篇）。这时候只能靠标题兜底——
+            # 标题相同几乎必然是同一篇的另一个快照，收进去书里就有两遍。
+            STATS["dup_title"].append("%s（与已有 %s 标题相同）" % (p.name, dup))
+            log("疑似重复，不重复入书，删原件：", p.name, "→", dup)
+            if not dry_run:
+                p.unlink(missing_ok=True)
+            return
         if dest.exists():
             STATS["skipped"].append("%s（已有同名，内容相同）" % dest.name)
             log("已存在，跳过：", dest.name)
         else:
             target_dir.mkdir(parents=True, exist_ok=True)
             cleaned, n_promo, img_entries = strip_promo_from_html(p)
+            n_office = sanitize_office_markup(cleaned)
+            if n_office:
+                log("  清理 Word 残留标签 %d 处" % n_office)
             STATS["promo"] += n_promo
             # 记账：本文用到的图片，供 promo.py 判断哪些是跨文章的固定推广图
             for fid in PROMO.record(account, img_entries):
@@ -844,23 +1016,42 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                     "（删推广图 %d 张）" % n_promo if n_promo else ""))
                 if not dry_run:
                     S.convert(cleaned, dest, "wechat", False)
+                    # 空壳保护：有一种快照转出来只有标题、正文一个字都没有
+                    # （2026-09-17 实测：3 篇 33-40MB 的就这样，成品 1581 字节）。
+                    # 把它当成功就等于这篇永远丢了，还会因为"已有同名"挡住以后重收。
+                    got = dest.stat().st_size if dest.exists() else 0
+                    if got < MIN_XHTML_BYTES:
+                        raise ValueError("转换结果疑似空壳（%d 字节，少于 %d）"
+                                         % (got, MIN_XHTML_BYTES))
                     STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
                     converted = True
+            except Exception:
+                # 失败就别留下半成品：留着会被下一次判成"已有同名"永远跳过
+                dest.unlink(missing_ok=True)
+                raise
             finally:
                 if cleaned != p:
                     cleaned.unlink(missing_ok=True)
-        # 只有真出了新的 XHTML 才备份原始 HTML。转换被「已存在」挡下说明这是重复件，
-        # 再往 原始HTML/ 塞一份只会多出对不上号的孤儿（踩过：自检时多出一份）。
-        if not dry_run and archive_original and converted:
-            raw_dir = dest_dir / RAW_SUBDIR
-            raw_dir.mkdir(parents=True, exist_ok=True)
-            raw_dest = raw_dir / p.name
-            if raw_dest.exists():
-                log("原 HTML 已备份过，删除收件箱副本：", p.name)
-                p.unlink()
+        # 只有真出了新的 XHTML 才动原件。转换被「已存在」挡下说明这是重复件。
+        if not dry_run and converted:
+            # 原件要删了，先把判重指纹和 biz 记下来：删完就再也算不出这些，
+            # 以后同一篇重放会被当成新文章收第二遍。
+            register_fingerprints(p, "%s/%s" % (dest_dir.name, dest.name))
+            register_biz(p, account)
+            if archive_original and _cfg_bool("keep_raw_html", False):
+                raw_dir = dest_dir / RAW_SUBDIR
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                raw_dest = raw_dir / p.name
+                if raw_dest.exists():
+                    log("原 HTML 已备份过，删除收件箱副本：", p.name)
+                    p.unlink()
+                else:
+                    shutil.move(str(p), str(raw_dest))
+                    log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
             else:
-                shutil.move(str(p), str(raw_dest))
-                log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
+                # 陈少 2026-09-17 定：有 xhtml 了，原 html 就没用了，一律删。
+                p.unlink(missing_ok=True)
+                log("xhtml 已生成，原 HTML 删除：", p.name)
         elif archive_original and not dry_run:
             p.unlink(missing_ok=True)
         touched[dest_dir.name] = dest_dir
@@ -920,9 +1111,19 @@ def collect_book_dirs():
 
 
 def source_dir(book_dir: Path) -> Path:
-    """该号的原始 XHTML 目录；老结构（xhtml 直接铺在号目录里）也能兼容。"""
+    """该号的 XHTML 目录；老结构（xhtml 直接铺在号目录里）也能兼容。
+
+    兼容回退必须**只对老目录生效**：只有当根下确实散着文稿时才认它是老结构。
+    新的/空的号一律进 `xhtml/` 子目录——否则新建号的文章平铺在根目录，
+    collect_book_dirs 认不出"这是个号"，台账、体检、后续自动成书会整本漏掉
+    （2026-09-17 实测：自动建号后 7 个新号全中招）。
+    """
     sub = book_dir / XHTML_SUBDIR
-    return sub if sub.is_dir() else book_dir
+    if sub.is_dir():
+        return sub
+    if any(book_dir.glob("*.xhtml")):        # 老结构：根目录已经有文稿
+        return book_dir
+    return sub                                # 新号 / 空目录：用标准结构
 
 
 COVER_FONTS = (
@@ -1140,6 +1341,17 @@ def fingerprint_index(force: bool = False, dry_run: bool = False) -> dict:
         except Exception:  # noqa: BLE001 缓存坏了就重建
             pass
     idx: dict[str, str] = {}
+    # 先把历史指纹读进来再合并，不覆盖。
+    # 原始 HTML 会被清掉（陈少 2026-09-17 定：有 xhtml 就不要 html），
+    # 那时下面的循环一个文件也扫不到——直接赋值会把整份判重能力清空，
+    # 以后同一篇重放就会被当成新篇收第二遍。
+    if FP_FILE.exists():
+        try:
+            cached = json.loads(FP_FILE.read_text(encoding="utf-8"))
+            if isinstance(cached, dict):
+                idx = cached
+        except Exception:
+            idx = {}
     for p in raw_files:
         for fp in content_fingerprints(p):
             idx.setdefault(fp, "%s/%s" % (p.parent.parent.name, p.name))
@@ -1211,11 +1423,10 @@ def harvest_sources(inbox: Path, dry_run: bool = False) -> int:
                 continue
             if dry_run:
                 # 预演也要把「会收 / 会搁置」说清楚，否则预演没意义
-                acc = detect_account_from_html(f)
-                if not acc:
-                    STATS["skipped"].append("%s（认不出公众号）" % f.name)
-                    log("  [预演] 认不出公众号，会跳过：", f.name)
-                elif not account_allowed(acc):
+                acc = detect_account_from_html(f) or "未识别号"
+                # 预演的判断必须跟正式跑完全一致，否则预演没意义
+                # （2026-09-17 踩过：两边各写一份，预演说会搁置、正式跑其实会收）
+                if not account_allowed(acc) and not _cfg_bool("auto_allow_new_accounts", True):
                     STATS["pending_accounts"].append("%s（识别为「%s」）" % (f.name, acc))
                     log("  [预演] 新号「%s」没确认 → 正式跑会搁置：%s" % (acc, f.name))
                 else:
@@ -1417,7 +1628,7 @@ def backfill_ads() -> tuple[int, int]:
             continue
         for f in sorted(raw.glob("*.htm*")):
             try:
-                tree = LH.fromstring(f.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+                tree = LH.fromstring(f.read_bytes(), parser=LH.HTMLParser(encoding="utf-8", huge_tree=True))
             except Exception as exc:  # noqa: BLE001
                 log("  跳过（解析失败）：", f.name, "->", exc)
                 continue
@@ -1501,8 +1712,29 @@ def main() -> int:
 
     if args.inbox:
         touched = process_inbox(Path(args.inbox).expanduser().resolve(), dry_run=args.dry_run)
+        # 规范化源文件：成书时才跑，新号没成书就永远轮不到，
+        # 源文件里会一直留着误判的 h2（2026-09-17 实测：8 个新号 12 处）。
+        for account, directory in touched.items():
+            try:
+                n = tidy_sources(directory)
+                if n:
+                    log("规范化 %s：%d 处" % (account, n))
+            except Exception as exc:      # 单号规范化失败不能拖垮整批
+                log("规范化失败：", account, type(exc).__name__, exc)
         # 只有真的出了书的才算「重建」，被门槛挡下的进报告里的「暂缓成书」
         built = [a for a, d in touched.items() if not publish_blocked(d)]
+        if not args.dry_run:
+            # 陈少 2026-09-17 定：html 一律删。收件箱副本已在 _add_one 里删，
+            # 这里补删源料文件夹里的原件（走废纸篓，没归档的不动）。
+            try:
+                import cleanup
+                done, kept = cleanup.find_archived_sources()
+                if done:
+                    n = cleanup.to_trash(done)
+                    log("源料原件清理：%d 个进废纸篓（剩 %d 个未归档留着）" % (n, len(kept)))
+                    STATS["cleanable"].extend(str(p) for p in done[:n])
+            except Exception as exc:      # 清理失败不能让成书流程挂掉
+                log("源料原件清理失败：", type(exc).__name__, exc)
         finish(built)
         return 0
 

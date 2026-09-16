@@ -20,7 +20,7 @@ OUT = Path("/Users/jessper/Life/EPUB制作/猫刀笔").expanduser()
 
 
 def target_name(path: Path) -> str:
-    source = LH.fromstring(path.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+    source = LH.fromstring(path.read_bytes(), parser=LH.HTMLParser(encoding="utf-8", huge_tree=True))
     title = S._article_title_from_source(source)
     if "_" in title:
         date_text, base = title.split("_", 1)

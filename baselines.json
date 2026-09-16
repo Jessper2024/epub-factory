@@ -1,16 +1,28 @@
 {
   "_meta": {
-    "updated_at": "2026-09-17T04:39:54",
-    "git": "93f4df8",
-    "books": 5
+    "updated_at": "2026-09-17T07:38:04",
+    "git": "a49d18c",
+    "books": 13
+  },
+  "intlsy 的狗窝（未成书）": {
+    "source_xhtml": 1
+  },
+  "九边（未成书）": {
+    "source_xhtml": 1
+  },
+  "币须知（未成书）": {
+    "source_xhtml": 1
   },
   "晚点LatePost_201909-202608.epub": {
-    "size_mb": 14.8,
-    "months": 11,
-    "articles": 25,
-    "toc": 83,
-    "parts": 11,
-    "source_xhtml": 25
+    "size_mb": 33.3,
+    "months": 16,
+    "articles": 38,
+    "toc": 119,
+    "parts": 16,
+    "source_xhtml": 38
+  },
+  "深网腾讯新闻（未成书）": {
+    "source_xhtml": 1
   },
   "猫刀笔_202608-202609.epub": {
     "size_mb": 4.8,
@@ -27,6 +39,18 @@
     "toc": 23,
     "parts": 2,
     "source_xhtml": 2
+  },
+  "硅facts（未成书）": {
+    "source_xhtml": 1
+  },
+  "精选君（未成书）": {
+    "source_xhtml": 6
+  },
+  "这很知乎（未成书）": {
+    "source_xhtml": 1
+  },
+  "酷我音乐（未成书）": {
+    "source_xhtml": 1
   },
   "阿马有你真好_202206-202609.epub": {
     "size_mb": 0.6,

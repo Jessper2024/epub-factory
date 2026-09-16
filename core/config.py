@@ -69,6 +69,13 @@ DEFAULTS: dict = {
     "max_heading_tail": 14,           # 序号后短语上限
     "caption_max_len": 20,            # 图后短块≤此长度视为图注，降级不进目录
 
+    # —— 收文（陈少 2026-09-17 定）——
+    # 源料文件夹 = 白名单：放进去的都是要的，不再搁 _待确认新号/ 等人工 allow。
+    "auto_allow_new_accounts": True,
+    # 转成 xhtml 后原 html 就没用了（xhtml 才是不可再生资产），默认删掉，
+    # 不再往 <号>/原始HTML/ 堆一份。改 True 可恢复旧行为（保留原件）。
+    "keep_raw_html": False,
+
     # —— 运行 ——
     "cloud_interval": 14400,          # 云端看板发布间隔（秒）= 4 小时
     "inbox_interval": 3600,           # 收文扫描间隔（秒）= 1 小时
@@ -88,16 +95,23 @@ DEFAULTS: dict = {
 _PATH_KEYS = {"engine_dir", "root", "watch_dir", "inbox_dir", "pending_dir", "audit_dir"}
 # 需要以 int 形式返回的键
 _INT_KEYS = {
-    "min_publish", "scan_subdirs", "max_heading_len", "max_heading_tail",
-    "caption_max_len", "cloud_interval", "inbox_interval", "dash_port",
-    "dash_cache_ttl", "backup_keep",
+    "min_publish", "scan_subdirs", "max_heading_len", "article_title_max",
+    "max_heading_tail", "caption_max_len", "cloud_interval", "inbox_interval",
+    "dash_port", "dash_cache_ttl", "backup_keep",
 }
+# 需要以 bool 形式返回的键。环境变量/JSON 读进来是字符串，"false" 也是真值，
+# 不转会把"关掉"读成"打开"——开关类配置最怕这种静默反转。
+_BOOL_KEYS = {"auto_allow_new_accounts", "keep_raw_html"}
 
 
 def _coerce(key: str, value):
     """把字符串值还原成该有的类型（JSON 与环境变量读进来都是字符串）。"""
     if key in _PATH_KEYS:
         return Path(str(value)).expanduser()
+    if key in _BOOL_KEYS:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
     if key in _INT_KEYS:
         try:
             return int(value)
