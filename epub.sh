@@ -7,6 +7,9 @@
 #   ./epub.sh list        只看扫描结果，不打包
 #   ./epub.sh check       交付前体检（源 xhtml + EPUB 双向校验）
 #   ./epub.sh toc 文件.epub  打印三级目录树
+#   ./epub.sh report      生成报表页面 _报表.html
+#   ./epub.sh ads         查看/维护推广图黑名单
+#   ./epub.sh backfill    给已归档的 HTML 补记图片账
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +35,7 @@ case "$cmd" in
   split) exec "$PY" "$ENGINE/build_epub.py" --split-year "$@" ;;
   ads)   exec "$PY" "$ENGINE/promo.py" "$@" ;;
   backfill) exec "$PY" "$ENGINE/build_epub.py" --backfill-ads ;;
+  report) exec "$PY" "$ENGINE/report.py" ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;

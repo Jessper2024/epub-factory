@@ -1136,11 +1136,19 @@ def backfill_ads() -> tuple[int, int]:
 
 
 def finish(built: list[str]) -> None:
-    """收尾：写处理报告 + 刷新台账 + 刷新推广图名单，让每次运行都留痕。"""
+    """收尾：写处理报告 + 刷新台账 + 刷新推广图名单 + 重建报表页面。"""
     write_report(built)
     refresh_ledger()
     (ROOT / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
     log("台账 →", "_台账.md")
+    try:  # 报表只是好看，坏了绝不能影响成书
+        import report as RP
+        accounts = [RP.scan_account(b) for b in collect_book_dirs()]
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        (ROOT / "_报表.html").write_text(RP.build_html(accounts, now), encoding="utf-8")
+        log("报表 →", "_报表.html")
+    except Exception as exc:  # noqa: BLE001
+        log("  报表生成失败（不影响成书）：", exc)
 
 
 def main() -> int:
