@@ -29,10 +29,18 @@
 │   ├─ wechat_to_sigil_xhtml.py  自写转换器，回退用
 │   ├─ yuanchuan_crawler/     微信列表抓取（备选）
 │   ├─ backup.sh              打包源（xhtml + 原始HTML）
+│   ├─ core/                  架构基础层（配置/审计/护栏/自检/可扩展管线）
+│   │   ├─ config.py          集中配置（常量的单一真相源）
+│   │   ├─ audit.py           审计日志（_审计/YYYY-MM.jsonl，可追溯）
+│   │   ├─ safety.py          原子写 + 不可再生目录护栏
+│   │   ├─ health.py          系统自检（8 项 + 评分）
+│   │   ├─ pipeline.py        来源协议与注册表（扩展新类型用）
+│   │   └─ adapters/          wechat（新增来源类型就加一个文件）
 │   ├─ baselines.json         回归基线
 │   ├─ allowed_accounts.json  新号白名单（本机状态，不进版本库）
+│   ├─ config.local.json      本地覆盖配置（可选，不进版本库）
 │   ├─ index.html / .nojekyll 云端看板产物（自动维护，勿手改）
-│   ├─ README.md / PROJECT_NOTES.md   用法与项目约定
+│   ├─ README.md / PROJECT_NOTES.md / ARCHITECTURE.md   用法·约定·架构
 │   └─ .venv/                 自建虚拟环境（lxml + Pillow + requests）
 ├─ _处理报告.md                上次跑了什么（自动生成）
 ├─ _处理报告_预演.md           上次 --dry-run 报告（不覆盖上面那份）
@@ -73,6 +81,12 @@ cd ~/Life/EPUB制作/_engine
 ./epub.sh ads             # 看推广图黑名单（--promote-all 转正候选）
 ./epub.sh backfill        # 给已归档 HTML 补记图片账
 ./epub.sh sync            # 代码改动提交并推 GitHub
+
+# 自检与备份
+./epub.sh health          # 系统自检：依赖/磁盘/git/备份/结构/异常，给评分
+./epub.sh backup          # 备份不可再生资产（3-2-1：本地 + 异地副本）
+./epub.sh backup list     # 列现有备份（含年龄与校验状态）
+./epub.sh backup verify <包>   # 校验某一份备份能不能用来恢复
 
 # 本地看板（本机看）
 ./epub.sh dash            # 开 http://127.0.0.1:8760（没在跑就起服务）
@@ -179,6 +193,27 @@ cd ~/Life/EPUB制作/_engine
 - **号名识别**：文件名 `日期_号_作者_标题` → meta 行 → `#js_name`；目录匹配走 `resolve_dir()` 模糊匹配
   （号名「猫笔刀」≠ 目录「猫刀笔」）。
 - 详细规则与踩坑见 skill 的 `references/operations.md` 和本目录 `PROJECT_NOTES.md`。
+
+## 架构与扩展（想改代码先看这个）
+
+系统分四层，**依赖永远单向：业务 → 扩展 → 基础**，基础层绝不反向 import 业务脚本：
+
+| 层 | 内容 |
+|---|---|
+| 入口层 | `epub.sh`（唯一入口）· `inbox_auto.sh` · `cloud_publish.sh` · `.command` 双击入口 |
+| 业务层 | `build_epub.py`（合订核心，1533 行，**已验证正确，不重写**）· `sigi_convert.py` · `promo.py` · `regress.py` |
+| 扩展层 | `core/pipeline.py` + `core/adapters/`（新增来源类型只加一个文件） |
+| 基础层 | `core/config.py` 配置 · `core/audit.py` 审计 · `core/safety.py` 护栏 · `core/health.py` 自检 |
+
+**新增一种来源类型**（网页正文、RSS、PDF…）三步，不动主流程：
+
+1. 新建 `core/adapters/mykind.py`，实现 `identify / extract / render` 并 `register(...)`
+2. 在 `core/adapters/__init__.py` 的 `_ADAPTERS` 里加上名字
+3. 试转：`python3 -m core.pipeline <文件> <输出目录>`
+
+规则不要复制：正文清洗、图片还原留在 `sigi_convert.py`，adapter 只做调度。
+
+完整说明（分层图、8 条不变量、灾难恢复手册）见 **`ARCHITECTURE.md`**。
 
 ## GitHub 与云端
 

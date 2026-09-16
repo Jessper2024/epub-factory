@@ -16,6 +16,8 @@
 #   ./epub.sh backfill    给已归档的 HTML 补记图片账
 #   ./epub.sh sync        把代码改动提交并推送到 GitHub 仓库
 #   ./epub.sh cloud       云端看板：publish（生成报表→git push）/ install（装定时任务）/ status
+#   ./epub.sh health      系统自检（依赖/磁盘/git/备份/结构/近期异常），输出评分
+#   ./epub.sh backup      备份不可再生资产（3-2-1）；verify <包> 校验、list 列清单
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +47,8 @@ case "$cmd" in
   report) exec "$PY" "$ENGINE/report.py" ;;
   dash)  exec "$ENGINE/dash_service.sh" "$@" ;;
   cloud) exec "$ENGINE/cloud_publish.sh" "$@" ;;
+  health) cd "$ENGINE" || exit 1; exec "$PY" -m core.health "$@" ;;
+  backup) exec "$ENGINE/backup.sh" "$@" ;;
   sync)  cd "$ENGINE" || exit 1
          git add -A
          if git diff --cached --quiet; then echo "没有改动，无需同步"; exit 0; fi

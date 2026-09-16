@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_epub as B  # noqa: E402
 import promo as P  # noqa: E402
 import regress as R  # noqa: E402
+from core import health as H  # noqa: E402   # 系统自检（依赖/磁盘/备份/结构…）
 
 ROOT = B.ROOT
 OUT = ROOT / "_报表.html"
@@ -182,6 +183,20 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
                 if n:
                     pend.append((d.name, n))
 
+    # 系统自检（依赖 / 磁盘 / 目录 / git / 备份 / 结构 / 近期异常 / 源料文件夹）
+    # 自检自己炸了不能连累报表——报表是给人看的，少一张卡比整页空白好
+    try:
+        h = H.check_all()
+    except Exception as e:
+        h = {"score": 0, "level": "alert", "level_text": "自检异常", "checks": [],
+             "detail": "%s: %s" % (type(e).__name__, e)}
+    dot_for = {"ok": "ok", "warn": "warn", "fail": "fail"}
+    checks_html = "".join(
+        f'<div class="chk"><span class="dot {dot_for.get(c["status"], "warn")}"></span>'
+        f'<span class="lb">{html.escape(c["label"])}</span>'
+        f'<span class="muted">{html.escape(c["detail"])}</span></div>'
+        for c in h.get("checks", []))
+
     # 回归
     base_file = R.BASE_FILE
     regress_state, regress_detail = "未建立基线", "先跑 ./epub.sh test --save"
@@ -316,6 +331,11 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
   .health .card h4 {{ margin: 0 0 6px; font-size: 13px; font-weight: 500; }}
   .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }}
   .ok {{ background: var(--ok); }} .warn {{ background: var(--warn); }}
+  .fail {{ background: #A32D2D; }}
+  .chk {{ display: flex; gap: 8px; align-items: baseline; padding: 4px 0;
+    border-bottom: 1px dashed var(--line); font-size: 12px; }}
+  .chk:last-child {{ border-bottom: 0; }}
+  .chk .lb {{ min-width: 62px; color: #5F5E5A; }}
   .acc {{ display: grid; grid-template-columns: 116px 1fr; gap: 16px; margin-bottom: 12px; }}
   .cover {{ width: 116px; border-radius: 6px; display: block; }}
   .cover.none {{ height: 155px; display: flex; align-items: center; justify-content: center;
@@ -383,6 +403,11 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <h4><span class="dot {'warn' if pend else 'ok'}"></span>待确认新号</h4>
       <div>{len(pend)} 个号在等点名（共 {sum(n for _, n in pend)} 篇）</div>
       <div class="muted">{('；'.join('%s %d 篇' % (n, c) for n, c in pend) + '　—— 要收就 <code>./epub.sh allow 号名</code>，不要就不管，绝不会混进别的书') if pend else '盯的文件夹里没有未确认的新号'}</div>
+    </div>
+    <div class="card">
+      <h4><span class="dot {'ok' if h['level'] == 'healthy' else ('fail' if h['level'] == 'alert' else 'warn')}"></span>系统自检</h4>
+      <div>{h['score']} 分 · {html.escape(h['level_text'])}　<span class="muted">{html.escape(h.get('checked_at', ''))}</span></div>
+      <div style="margin-top:6px">{checks_html or '<span class="muted">自检不可用</span>'}</div>
     </div>
   </div>
 

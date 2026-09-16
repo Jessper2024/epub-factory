@@ -8,6 +8,7 @@ yuanchuan_crawler/raw_html/
 yuanchuan_crawler/epub_images/
 yuanchuan_crawler/*.epub
 
-# 本机状态（各人的白名单/指纹表不一样，不进版本库）
+# 本机状态（各人的白名单/指纹表/本地覆盖不一样，不进版本库）
 allowed_accounts.json
+config.local.json
 launchd/*.log

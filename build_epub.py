@@ -726,6 +726,10 @@ STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
 
 # 认「这是不是微信公众号文章」的两个特征（正文容器 / 微信图床）
 WECHAT_MARKS = ('id="js_content"', "mmbiz.qpic.cn")
+# 2026-09-17 补：有一类 SingleFile 存档把真正的 DOM 塞在文件后半段，头部 512KB 里
+# 只有 meta 和压缩 JS，上面两个特征一个都撞不到（实测 6 篇全被判「不是微信文章」）。
+# 头部只要有微信专属的 og:url 就认，不为了它去全量读 19MB。
+WECHAT_HEAD_RE = re.compile(r'og:url["\']?\s+content=["\']https?://mp\.weixin\.qq\.com')
 
 # 号白名单：名单外的新号先不建书，只报告等确认（`./epub.sh allow 号名` 加进来）
 ALLOW_FILE = ENGINE_DIR / "allowed_accounts.json"
@@ -1055,7 +1059,10 @@ def walk_html(root: Path, depth: int = SCAN_SUBDIRS) -> list[Path]:
     return out
 
 
-def _head_text(path: Path, limit: int = 512_000) -> str:
+HEAD_BYTES = 512_000          # _head_text 读的是**字节**数，不是字符数
+
+
+def _head_text(path: Path, limit: int = HEAD_BYTES) -> str:
     """读文件开头一段（照片 base64 都在正文里，头部足够判断特征）。"""
     try:
         with path.open("rb") as fh:
@@ -1064,18 +1071,24 @@ def _head_text(path: Path, limit: int = 512_000) -> str:
         return ""
 
 
+def _has_wechat_mark(text: str) -> bool:
+    return any(m in text for m in WECHAT_MARKS) or bool(WECHAT_HEAD_RE.search(text))
+
+
 def looks_like_wechat(path: Path) -> bool:
-    """判断是不是微信公众号文章。命中不了再全量读一遍，宁可慢也不漏。"""
-    head = _head_text(path)
-    if WECHAT_MARKS[0] in head or WECHAT_MARKS[1] in head:
+    """判断是不是微信公众号文章。头部命中不了再全量读一遍，宁可慢也不漏。"""
+    if _has_wechat_mark(_head_text(path)):
         return True
-    if len(head) < 512_000:
-        return False                      # 文件本来就这么大，已经全看过了
+    # 判断「头部已经等于全文」要按**字节**比。中文 UTF-8 一个字 3 字节，
+    # 拿字符数去比字节上限会让中文文件永远走不到下面的全量兜底
+    # （2026-09-17 修：6 篇新文章因此被误判「不是微信文章」）。
     try:
+        if path.stat().st_size <= HEAD_BYTES:
+            return False                  # 文件就这么大，头里没有就是没有
         full = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
-    return WECHAT_MARKS[0] in full or WECHAT_MARKS[1] in full
+    return _has_wechat_mark(full)
 
 
 OG_TITLE_RE = re.compile(r'og:title"\s+content="([^"]*)"')
