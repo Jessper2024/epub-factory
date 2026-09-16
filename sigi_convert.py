@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+import datetime
 import mimetypes
 import re
 import sys
@@ -436,6 +437,43 @@ def _date_from_publish_time(value: str) -> str:
     return match.group(1) if match else ""
 
 
+_TIMESTAMP_RE = re.compile(
+    r'(?:var\s+ct\s*=\s*["\']?|"publish_time"\s*:\s*["\']?'
+    r'|oriCreateTime\s*=\s*["\']?|create_time\s*=\s*["\']?)(1[6-9]\d{8})')
+
+
+def _date_from_timestamp_source(source) -> str:
+    """页面里读不到「YYYY年M月D日」时的兜底：从 JS 时间戳推日期（UTC+8）。
+
+    2026-09-17 补：一批 SingleFile 存档的 ``#publish_time`` 是**空节点**（保存时页面
+    没渲染完），但 ``var ct`` / ``publish_time`` 时间戳还在，只是位置靠后——既不在
+    DOM 里、也不在文件头 512KB 内。不兜底就会被当成「未标注日期」单独成一章。
+    时间戳只在日期缺失时才找，正常文章不会走到这里。
+    """
+    text = ""
+    try:
+        text = etree.tostring(source, encoding="unicode")
+    except Exception:  # noqa: BLE001 - 兜底失败就当没日期，不能影响主流程
+        return ""
+    match = _TIMESTAMP_RE.search(text or "")
+    if not match:
+        return ""
+    try:
+        stamp = int(match.group(1))
+        moment = (datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=stamp)
+                  + datetime.timedelta(hours=8))
+    except (ValueError, OverflowError):
+        return ""
+    return "%d年%d月%d日" % (moment.year, moment.month, moment.day)
+
+
+def _date_text_from_source(source) -> str:
+    """文章日期：先读可见的发布时间，读不到再退回 JS 时间戳。"""
+
+    return (_date_from_publish_time(_first_text_by_id(source, "publish_time"))
+            or _date_from_timestamp_source(source))
+
+
 NOTION_TITLE_SUFFIX_RE = re.compile(r"(?:\s*[_|｜＿]\s*Notion)+\s*$", re.I)
 
 
@@ -488,8 +526,7 @@ def _article_title_from_source(source: etree._Element) -> str:
     """Build the Sigil title as ``YYYY年M月D日_原标题`` when available."""
 
     base_title = _base_title_from_source(source)
-    publish_time = _first_text_by_id(source, "publish_time")
-    date_text = _date_from_publish_time(publish_time)
+    date_text = _date_text_from_source(source)
     if date_text and not base_title.startswith(f"{date_text}_"):
         return f"{date_text}_{base_title}"
     return base_title
@@ -939,7 +976,7 @@ def _filename_title_from_source(source: etree._Element, process_type: str = "wec
         account = ""
         author = _notion_property(source, "作者")
     else:
-        date_text = _date_from_publish_time(_first_text_by_id(source, "publish_time"))
+        date_text = _date_text_from_source(source)
         account = _account_name_from_source(source)
         author = _author_from_source(source)
     parts = [part for part in (date_text, account, author, base_title) if part]
