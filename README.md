@@ -87,7 +87,9 @@ cd ~/Life/EPUB制作/_engine
 - **源文件也要规范**：打包前 `tidy_sources()` 就地改写 `xhtml/`，标题 h1 唯一，真小标题 h3，
   空/超 40 字/以 `[` 开头（参考文献）/图注一律降 `<p>`。合订侧 h3 不再降级。
 - **元数据**：`dc:creator` = 公众号博主名，排序作者恒为「沪上陈少」。
-- **去推广图**：`build_epub.py` 里的 `PROMO_FILE_IDS`（戴老板 8 个 fileid，视觉确认过），转换前按 URL 删。
+- **去推广图（会自己学）**：`promo.py` 给每篇的图片记账；跨文章重复出现在文末的自动升为候选，
+  人工看图确认后永久删除（`./epub.sh ads` 看名单，`--promote-all` 转正）。
+  作者配图（如猫刀笔文末生活照）标「已排除」永不删。历史补记账用 `./epub.sh backfill`。
 - **号名识别**：文件名 `日期_号_作者_标题` → meta 行 → `#js_name`；目录匹配走 `resolve_dir()` 模糊匹配
   （号名「猫笔刀」≠ 目录「猫刀笔」）。
 - 详细规则与踩坑见 skill 的 `references/operations.md` 和本目录 `PROJECT_NOTES.md`。
