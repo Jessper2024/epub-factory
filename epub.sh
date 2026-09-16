@@ -17,7 +17,8 @@
 #   ./epub.sh sync        把代码改动提交并推送到 GitHub 仓库
 #   ./epub.sh cloud       云端看板：publish（生成报表→git push）/ install（装定时任务）/ status
 #   ./epub.sh health      系统自检（依赖/磁盘/git/备份/结构/近期异常），输出评分
-#   ./epub.sh backup      备份不可再生资产（3-2-1）；verify <包> 校验、list 列清单
+#   ./epub.sh backup      备份不可再生资产；verify <包> 校验、list 列清单、clean 老化
+#   ./epub.sh cleanup     空间清理（预演默认；--apply 走废纸篓删中间产物/旧成品/已归档源料）
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +64,7 @@ case "$cmd" in
            exit 1
          fi ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
+  cleanup) exec "$PY" "$ENGINE/cleanup.py" "$@" ;;   # 预演；--apply 才真删（走废纸篓）
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
 esac

@@ -356,18 +356,39 @@ cmd_clean() {
   local keep
   keep="$(cfg backup_keep 5)"
   [ -d "$dest" ] || return 0
-  # 只动自己命名的备份包，绝不碰目录里别的东西
+  # 只动自己命名的备份包，绝不碰目录里别的东西。
+  # 老化策略：**同一天只留最新一份**再按总数截断——
+  # 曾一天内连打 4 份（内容几乎相同），纯按份数留会把 200MB 的空间浪费在重复包上。
   "$PY" - "$dest" "$keep" <<'PYEOF'
-import sys, pathlib, re
+import pathlib, re, sys
+
 dest, keep = pathlib.Path(sys.argv[1]), int(sys.argv[2])
 pkgs = sorted(dest.glob("EPUB源_*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
-for old in pkgs[keep:]:
-    for suf in ("", ".sha256"):
-        p = pathlib.Path(str(old) + suf)
-        if p.exists():
-            p.unlink()
-            print("  删除旧备份", p.name)
-print(f"  保留 {min(len(pkgs), keep)} 份（策略 keep={keep}）")
+
+byday: dict[str, list] = {}
+for p in pkgs:
+    m = re.search(r"(\d{8})-\d{4}", p.name)
+    byday.setdefault(m.group(1) if m else p.name[:8], []).append(p)
+
+kept = [group[0] for group in byday.values()]          # 每天最新的一份
+drop = [p for group in byday.values() for p in group[1:]]
+kept.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+drop += kept[keep:]                                     # 再按总数截断
+kept = kept[:keep]
+
+def unlink(pkg):
+    for suf in ("", ".sha256", ".manifest.json"):
+        f = pathlib.Path(str(pkg) + suf)
+        if f.exists():
+            f.unlink()
+
+for old in drop:
+    unlink(old)
+    print("  清理旧备份", old.name)
+
+print("  保留 %d 份（策略：每天 1 份 + 总数上限 %d）" % (len(kept), keep))
+for p in kept:
+    print("    ·", p.name)
 PYEOF
 }
 
