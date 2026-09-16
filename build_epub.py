@@ -39,6 +39,9 @@ from pathlib import Path
 
 from lxml import etree
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import promo as PROMO  # noqa: E402
+
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 EPUB_NS = "http://www.idpf.org/2007/ops"
 NSMAP = {None: XHTML_NS, "epub": EPUB_NS}
@@ -59,19 +62,10 @@ INBOX_DIR = ROOT / "_待处理"      # 待处理 HTML 的收件箱（下划线�
 SKIP_DIRS = {"EPUB成品", ".workbuddy", "微信公众号下载"}  # 源文件夹不当作号目录
 BACKUP_HINT = "旧版备份"
 
-# 微信文末推广图黑名单（图片在 mmbiz 图床的 fileid，URL 中包含即删除）。
-# 均为「饭统戴老板」号的固定推广图：关注矩阵 / 设为★不要错过 / 欢迎加入远川。
-# 新号发现新的推广图时，把 fileid 加进来即可。
-PROMO_FILE_IDS = (
-    "OGh1hyMTnsJqoA09XyMaAedfACb1a3EiaJ1kNo4cFa3mYzKc",   # 关注我们（矩阵）
-    "6FudoaFVUAj7n9lItPA3hYGglic0RmFkO8QiasSicyRXbW4I58tQLBuc",  # 设为★不要错过+商务邮箱
-    "OGh1hyMTnsKt7D7NasHgHicUgX2RUiaZFWfYn0ia1Saic10X8vYaBiac",  # 关注我们（矩阵·新版）
-    "OGh1hyMTnsLgDlWiaG23YCzroQy9yrqX4dsbME38cKKGeJneyULBbGHZ",  # 商务合作+设为★
-    "6FudoaFVUAiahXJGvdRGiaRQAKvyX8JcnG2ia3htaBcUqWC6xQvBM6zF",  # 关注我们（矩阵·新版2）
-    "6FudoaFVUAiahXJGvdRGiaRQAKvyX8JcnG8g0BqNJWuibaQUpTqN483X",  # 设为★不要错过·新版2
-    "9E1iaWb6waicA0ialEoiba6Ck5JBEpFoBgfDQrTB1ibUnjnIu6x7uCdy",  # 欢迎加入远川研究所
-    "9E1iaWb6waicB03rKF4wKZVeqQxT9niadvzXnn0dv8nNro2P6RYFPstT",  # 欢迎加入远川研究所·2
-)
+# 微信文末推广图黑名单：规则与记账在 promo.py（会自己学），这里只做转发。
+# 出厂预置 8 个戴老板固定推广图（视觉确认过）；之后跨文章重复出现在文末的图会自动升为
+# 待确认候选，`./epub.sh ads` 看名单，确认后 `./epub.sh ads --promote-all` 永久删除。
+PROMO_FILE_IDS = tuple(PROMO.PRESET)
 
 # 图书作者 = 公众号博主；排序作者统一为「沪上陈少」（陈少指定的书架排序名）
 SORT_AUTHOR = "沪上陈少"
@@ -355,10 +349,11 @@ def parse_article(path: Path) -> Article | None:
 
 
 # ---------------------------------------------------------------- 识别博主
-def strip_promo_from_html(src: Path) -> tuple[Path, int]:
-    """转换前按 URL 黑名单删除微信文末推广图，返回 (处理后的临时文件, 删除数)。
+def strip_promo_from_html(src: Path) -> tuple[Path, int, list]:
+    """转换前按黑名单删除微信文末推广图，返回 (处理后的临时文件, 删除数, 本文图片清单)。
 
-    只删 img 本身，不动周边文字；源文件不动。没有命中时原样返回。
+    只删 img 本身，不动周边文字；源文件不动。没有命中时原样返回原路径。
+    顺手把正文所有图片登记一份（fileid / 是否文末），交给 promo.py 累积判断哪些是推广图。
     """
     from lxml import html as LH
     raw = src.read_bytes()
@@ -371,22 +366,24 @@ def strip_promo_from_html(src: Path) -> tuple[Path, int]:
         parent = el.getparent()
         if parent is not None:
             parent.remove(el)
+    entries = PROMO.scan_entries(tree)
+    active = PROMO.active_ids()
     removed = 0
     for img in tree.xpath('//*[@id="js_content"]//*[local-name()="img"]'):
         u = (img.get("data-src") or img.get("src") or "")
-        if any(fid in u for fid in PROMO_FILE_IDS):
+        if any(fid in u for fid in active):
             parent = img.getparent()
             if parent is not None:
                 parent.remove(img)
                 removed += 1
     if not removed:
-        return src, 0
+        return src, 0, entries
     import tempfile
     fd, tmp = tempfile.mkstemp(suffix=".html")
     os.close(fd)
     with open(tmp, "wb") as f:
         f.write(etree.tostring(tree, method="html", encoding="utf-8"))
-    return Path(tmp), removed
+    return Path(tmp), removed, entries
 
 
 def detect_account_from_html(path: Path) -> str:
@@ -699,7 +696,8 @@ def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | 
 
 
 # ---------------------------------------------------------------- 归档新文件
-STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0}
+STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
+               "promo_candidates": []}
 
 
 def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
@@ -748,8 +746,12 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
             log("已存在，跳过：", dest.name)
         else:
             target_dir.mkdir(parents=True, exist_ok=True)
-            cleaned, n_promo = strip_promo_from_html(p)
+            cleaned, n_promo, img_entries = strip_promo_from_html(p)
             STATS["promo"] += n_promo
+            # 记账：本文用到的图片，供 promo.py 判断哪些是跨文章的固定推广图
+            for fid in PROMO.record(account, img_entries):
+                STATS["promo_candidates"].append(
+                    "%s（%s）" % (fid[:16] + "…", account))
             try:
                 log("转换：%s → %s/%s/%s" % (
                     p.name, dest_dir.name, XHTML_SUBDIR,
@@ -1079,6 +1081,10 @@ def write_report(built: list[str]) -> Path:
              "- 跳过重复：%d" % len(STATS["skipped"]),
              "- 失败：%d" % len(STATS["failed"]),
              "- 删除推广图：%d 张" % STATS["promo"], ""]
+    if STATS["promo_candidates"]:
+        lines += ["## 疑似推广图（待确认）",
+                  "跨文章重复出现在文末，已列为候选。看过确认后跑 `./epub.sh ads --promote-all`。",
+                  ""] + ["- %s" % x for x in STATS["promo_candidates"]] + [""]
     for title, items in (("新增", STATS["added"]), ("跳过", STATS["skipped"]),
                          ("失败", STATS["failed"])):
         if not items:
@@ -1104,10 +1110,36 @@ def write_report(built: list[str]) -> Path:
     return path
 
 
+def backfill_ads() -> tuple[int, int]:
+    """把已归档的 原始HTML/ 全扫一遍补记账，让黑名单知识库立刻有全量历史。
+
+    只记账不转换、不改任何书；重复跑不会重复计数（record 内部按篇去重）。
+    """
+    from lxml import html as LH
+    n_files = n_cands = 0
+    for book in collect_book_dirs():
+        raw = book / RAW_SUBDIR
+        if not raw.is_dir():
+            continue
+        for f in sorted(raw.glob("*.htm*")):
+            try:
+                tree = LH.fromstring(f.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                log("  跳过（解析失败）：", f.name, "->", exc)
+                continue
+            cands = PROMO.record(book.name, PROMO.scan_entries(tree))
+            n_files += 1
+            n_cands += len(cands)
+            log("  记账 %s / %s%s" % (book.name, f.name[:36],
+                                     "（新候选 %d）" % len(cands) if cands else ""))
+    return n_files, n_cands
+
+
 def finish(built: list[str]) -> None:
-    """收尾：写处理报告 + 刷新台账，让每次运行都留痕。"""
+    """收尾：写处理报告 + 刷新台账 + 刷新推广图名单，让每次运行都留痕。"""
     write_report(built)
     refresh_ledger()
+    (ROOT / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
     log("台账 →", "_台账.md")
 
 
@@ -1120,7 +1152,15 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="只扫描不打包")
     ap.add_argument("--split-year", action="store_true",
                     help="按年分册（号名_2025.epub、号名_2026.epub），书太大时用")
+    ap.add_argument("--backfill-ads", action="store_true",
+                    help="把已归档的 原始HTML/ 全扫一遍补记图片账（不转换、不改书）")
     args = ap.parse_args()
+
+    if args.backfill_ads:
+        n_files, n_cands = backfill_ads()
+        log("补记账完成：%d 篇，新升候选 %d 个。名单见 ./epub.sh ads" % (n_files, n_cands))
+        (ROOT / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
+        return 0
 
     if args.inbox:
         touched = process_inbox(Path(args.inbox).expanduser().resolve())

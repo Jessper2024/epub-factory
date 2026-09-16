@@ -30,6 +30,8 @@ case "$cmd" in
   list)  exec "$PY" "$ENGINE/build_epub.py" --list ;;
   test)  exec "$PY" "$ENGINE/regress.py" "$@" ;;
   split) exec "$PY" "$ENGINE/build_epub.py" --split-year "$@" ;;
+  ads)   exec "$PY" "$ENGINE/promo.py" "$@" ;;
+  backfill) exec "$PY" "$ENGINE/build_epub.py" --backfill-ads ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
