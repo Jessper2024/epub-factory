@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 爬虫中间产物（可重新抓取，不进版本库）
+yuanchuan_crawler/raw_html/
+yuanchuan_crawler/epub_images/
+yuanchuan_crawler/*.epub

@@ -1,0 +1,16 @@
+# 待补抓的链接（被微信号级风控拦截，服务端抓不到）
+# 状态：服务端 urllib / WebFetch 均返回「环境异常」验证页（biz=MzE5ODk2NjUwOA== 长链 /s? 形式被风控）
+# 出路（二选一，本机做）：
+#   1) 本机浏览器打开下面链接 → 「网页，完整」另存为 .html（含同名 _files/ 图夹）→ 丢进 raw_html/
+#   2) 或本机跑：python3 fetch_links.py   （脚本已内置全部 13 链接，本机 IP 正常能过风控）
+# 补完后告诉我，我跑 html_to_epub.py 合成完整 EPUB。
+
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498355&idx=1&sn=107d23382491545a491d803a33c2c1b6&chksm=97dbb64c3697aa520c1c7b75386ed3ae27c4cb065d352457467cd37902ebcc2d0d9c02751566#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498337&idx=1&sn=625f66280887d84340ab1b6f6fbe437a&chksm=9701d5463b2a48cbbea521c6abaee201e77cca85712a6033c010184625c8448d3d39e567ff40#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498331&idx=1&sn=a64f609611d97f01103cd94b8705e471&chksm=9773a141602530728337f5698f6624912cab79250bb50e3abc61723f5b612922f74bae746aec#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498322&idx=1&sn=b9f56b9d51a25707cedf7a09e3e50c7f&chksm=97eaeb61d8864566e3c297237fd380505ef4554e7162bca005c0e3dbb2935fa12ebc3d27f901#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498318&idx=1&sn=fa4eb76cdd2b2af5784bc826b0b56e9b&chksm=97982259d48b99bbb3360fe470a6ec726dfe501f99f23df6b588f1e154d97bef5d11e5c1804a#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498308&idx=1&sn=d5bfd2ff7261863f85dfb156991d0302&chksm=9792f70d4f5c423f2c3924e4ed5c08d901381f9cea470118c95f883a1c4b25098f6698ecff74#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498223&idx=1&sn=09e5fdef93c47364e4bf69ec982d57e9&chksm=97e52c7c859c1ebb38dcdb31130d0be68a84d7e558daf2894981d4d188c092b5fe894d174e74#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498190&idx=1&sn=d39e4d284d2d039e77fc7d20bc8b471a&chksm=97a277aec18360089fa479771d54379a6305e0ef6aa01cadc00bd36c73dbed4399dc9bb31eed#rd
+https://mp.weixin.qq.com/s?__biz=MzE5ODk2NjUwOA==&mid=2247498180&idx=1&sn=f4b84dd210fb8a608f18e71c0024c3fb&chksm=978bddf48c47ad900e67b9d5476d5bb11dec343904fbae752f2f2dc5d4d909fb8c0a9e87b0cf#rd
