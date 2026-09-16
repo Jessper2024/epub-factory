@@ -717,16 +717,19 @@ def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | 
 STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
                "promo_candidates": [], "held": []}
 
-# 首次成书门槛（陈少 2026-09-16 定）：一个号攒够这么多篇 XHTML 才出第一本书。
-# 只挡「自动流程首次成书」——已有成品的书照常跟着新增更新，不会因为门槛而停更；
-# 手动点名（--only / --add / 全量）一律无视门槛。改门槛：--min-articles N。
+# 成书门槛（陈少 2026-09-16 两次澄清后定）：一个号攒够这么多篇 XHTML 才出书（默认 30）。
+# 只管「还没有成品的号」——已有成品的书**不受门槛约束**，照常跟着新增更新。
+#   陈少原话：「已经生成的就算了，我说的是后续的默认成书，
+#             如果那个文件夹里面不足30篇也需要成书，我会告诉你的」
+# 手动点名一律无视门槛（--only / --add / 全量），需要提前出书时用。
+# 改门槛：--min-articles N；0 = 关掉门槛。
 MIN_PUBLISH = 30
 
 
 def publish_blocked(book_dir: Path) -> str | None:
     """该号是否因为「篇数没攒够」而暂不成书。返回原因，可成书则返回 None。
 
-    只看首次成书：已经有 epub 的书不受门槛约束（否则书会停在旧版本，没人看得出来）。
+    已有成品的书直接放行：否则书会停在旧版本、界面上也看不出异样，没人会发现。
     """
     if MIN_PUBLISH <= 0:
         return None
@@ -736,7 +739,7 @@ def publish_blocked(book_dir: Path) -> str | None:
     n = len([p for p in src.glob("*.xhtml") if p.is_file()])
     if n >= MIN_PUBLISH:
         return None
-    return "源 %d 篇，未达首次成书门槛 %d 篇（差 %d 篇）" % (n, MIN_PUBLISH, MIN_PUBLISH - n)
+    return "源 %d 篇，未达成书门槛 %d 篇（差 %d 篇）" % (n, MIN_PUBLISH, MIN_PUBLISH - n)
 
 
 def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
@@ -1073,8 +1076,8 @@ def refresh_ledger() -> Path:
     for book in collect_book_dirs():
         epubs = sorted(book.glob("*.epub"))
         first, last, count = book_span(book)
+        why = publish_blocked(book)
         if not epubs:
-            why = publish_blocked(book)
             note = ("（未成书·差 %d 篇）" % (MIN_PUBLISH - count)) if why else "（未成书）"
             lines.append("| %s | %d | %s ~ %s | %s | — | — | — |"
                          % (book.name, count, first, last, note))
@@ -1105,8 +1108,8 @@ def write_report(built: list[str]) -> Path:
              "- 删除推广图：%d 张" % STATS["promo"], ""]
     if STATS["held"]:
         lines += ["## 暂缓成书（%d）" % len(STATS["held"]),
-                  "源文件已经归档进 `xhtml/` 了，只是还没到首次成书门槛，所以这次没打包。",
-                  "等篇数攒够会自动出书；想立刻出就跑 `./epub.sh only <号名>`。", ""]
+                  "源文件已经归档进 `xhtml/` 了，只是这个号还没成过书、篇数也没到门槛（%d 篇），所以没打包。" % MIN_PUBLISH,
+                  "等篇数攒够会自动出书；想现在就要，跑 `./epub.sh only <号名>`（手动点名无视门槛）。", ""]
         lines += ["- %s" % x for x in STATS["held"]]
         lines.append("")
     if STATS["promo_candidates"]:

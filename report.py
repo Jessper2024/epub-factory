@@ -167,6 +167,11 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
     # 只有旧 epub、没有 xhtml 源的号（健康状态里要点名）
     missing_src = [a["account"] for a in accounts if not a["xhtml_count"]]
 
+    # 还没成过书、在等攒够篇数的号（成书门槛）
+    waiting = [(a["account"], B.publish_blocked(Path(a["dir"])))
+               for a in accounts if not a["epubs"]]
+    waiting = [(n, w) for n, w in waiting if w]
+
     # 回归
     base_file = R.BASE_FILE
     regress_state, regress_detail = "未建立基线", "先跑 ./epub.sh test --save"
@@ -309,6 +314,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
   .row {{ display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }}
   .pill {{ font-size: 11px; background: #EAF3DE; color: var(--ok); border-radius: 20px; padding: 3px 9px; }}
   .pill.grey {{ background: #F1EFE8; color: #5F5E5A; }}
+  .pill.warn {{ background: #FAEEDA; color: #854F0B; }}
   .epub {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }}
   .mono {{ font-family: ui-monospace, Menlo, monospace; font-size: 12px; }}
   table {{ width: 100%; border-collapse: collapse; background: var(--card);
@@ -357,6 +363,11 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <h4><span class="dot {'warn' if missing_src else 'ok'}"></span>缺源的书</h4>
       <div>{len(missing_src)} 个号没有 XHTML 源</div>
       <div class="muted">{('、'.join(missing_src) + ' 只有旧 epub、没有源，无法跟着规则升级（跑拆解流程补齐）') if missing_src else '每个号都有 XHTML 源，随时可以从源重建'}</div>
+    </div>
+    <div class="card">
+      <h4><span class="dot {'warn' if waiting else 'ok'}"></span>成书门槛（{B.MIN_PUBLISH} 篇）</h4>
+      <div>{len(waiting)} 个号还没成书，在等攒篇数</div>
+      <div class="muted">{('；'.join('%s（%s）' % (n, w) for n, w in waiting) + '　说一声就能提前出书') if waiting else '已有成品的号不受门槛约束，照常跟着新增更新'}</div>
     </div>
   </div>
 
