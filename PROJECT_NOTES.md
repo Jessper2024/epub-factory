@@ -1,5 +1,15 @@
 # 项目长期约定（微信文章抓取 → EPUB）
 
+## 项目位置（2026-09-16 定案，长期不变）
+
+- **代码**：`~/Life/EPUB制作/_engine/`（本目录，带 git 和自建 venv）
+- **数据**：`~/Life/EPUB制作/<号名>/`（xhtml/ · 原始HTML/ · cover.jpg · epub）
+- **收件箱**：`~/Life/EPUB制作/_待处理/`
+- **skill**：`~/.workbuddy/skills/epub-factory/`（用户级，任何会话自动可见）
+- **唯一入口**：`~/Life/EPUB制作/_engine/epub.sh`（`./epub.sh` / `only` / `inbox` / `add` / `list` / `check` / `toc`）
+- **不要把长期资产放进 `~/WorkBuddy/<时间戳>/` 或 `~/Documents/Codex/<日期>/`**——会话级临时目录，会越堆越多、随时被清。
+- 依赖装在 `_engine/.venv`，不再依赖 WorkBuddy 的托管 venv。
+
 ## 工作流（陈少 2026-09-16 拍板）
 - 陈少给微信文章链接 → 我**直接解析处理**，不来回追问。
 - 处理链：`fetch_links.py`（抓链接正文 HTML 落 raw_html/）→ `html_to_epub.py`（合成 EPUB）。
@@ -16,9 +26,10 @@
 - 待补清单：`yuanchuan_crawler/pending_links.txt`（9 个被拦长链）。
 
 ## 本地 HTML → Sigil XHTML（陈少主力流程，2026-09-16 定案）
-- 唯一入口：**`/Users/jessper/Documents/Codex/2026-09-09/ze/outputs/sigi_convert.py`**（已打懒加载补丁，
-  备份 `*.bak-20260916-064630`）。单篇 `sigi_convert.py in.html -o out.xhtml --type wechat`；
-  整个目录用 `/Users/jessper/WorkBuddy/2026-09-16-04-04-48/batch_wechat_sigil.py`（改 SRC/OUT 即可）。
+- 唯一入口：**`~/Life/EPUB制作/_engine/sigi_convert.py`**（已打懒加载补丁，
+  旧备份在 `~/Documents/Codex/2026-09-09/ze/outputs/sigi_convert.py.bak-20260916-064630`）。
+  单篇 `sigi_convert.py in.html -o out.xhtml --type wechat`；
+  整个目录用 `~/Life/EPUB制作/_engine/batch_wechat_sigil.py`（改 SRC/OUT 即可）。
 - 陈少用 OpenClaw（=SingleFile）在浏览器存微信文章，HTML 丢 `~/Downloads/微信公众号下载`；
   成品 XHTML 落 `~/Life/EPUB制作/<号名>/`。命名 `日期_号_作者_标题-Sigil.xhtml`。
 - 我自写的 `wechat_to_sigil_xhtml.py` 已不主用（补丁并入 sigi_convert 后功能重叠），留作回退。
@@ -27,7 +38,7 @@
 - 验收：XML 可解析 + 占位图 0 + `<br>` 0 + 外链 0。
 
 ## XHTML → 合订 EPUB（2026-09-16 定案）
-- 脚本：`build_epub.py`（本工作区）。`--only 号` / `--add 文件...`（自动识别号名归档+重建）/ `--list`。
+- 脚本：`~/Life/EPUB制作/_engine/build_epub.py`（经 `epub.sh` 调用）。`--only 号` / `--add 文件...` / `--list`。
 - 约定：**每号一个独立文件夹** `~/Life/EPUB制作/<号名>/`：
   `xhtml/`（原始文档备份）+ `cover.jpg`（封面，自动生成、可换）+ `<号名>_YYYYMM[-YYYYMM].epub`（产物）。
   `--add` 新文件自动归到 `<号>/xhtml/`。
@@ -47,7 +58,8 @@
 - 号名→目录必须走 `resolve_dir()` 模糊匹配（号名「猫笔刀」≠ 目录「猫刀笔」，否则会拆成两本）。
 - **元数据：作者 `dc:creator` = 公众号博主名**（不是文章笔名 moomoocat）；**排序作者恒为「沪上陈少」**
   （`opf:file-as` + `refines meta` 两种都写，兼容 EPUB2/calibre 与 EPUB3）。
-- skill `html-to-sigil-converter` 在 `/Users/jessper/Documents/Codex/2026-09-09/ze/skills/`（不在 ~/.workbuddy/skills）。
+- skill **已搬到 `~/.workbuddy/skills/epub-factory/`**（原名 html-to-sigil-converter，2026-09-16 一并改名）。
+  规则改动要同步写进 skill 的 `references/operations.md`，否则新会话读不到。
 
 ## 已交付
 - `html_to_epub.py`（HTML→EPUB，含本地图回退 + 图片远程下载 + XML 良构清洗）
