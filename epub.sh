@@ -10,6 +10,7 @@
 #   ./epub.sh report      生成报表页面 _报表.html
 #   ./epub.sh ads         查看/维护推广图黑名单
 #   ./epub.sh backfill    给已归档的 HTML 补记图片账
+#   ./epub.sh sync        把代码改动提交并推送到 GitHub 私有仓库
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,12 @@ case "$cmd" in
   ads)   exec "$PY" "$ENGINE/promo.py" "$@" ;;
   backfill) exec "$PY" "$ENGINE/build_epub.py" --backfill-ads ;;
   report) exec "$PY" "$ENGINE/report.py" ;;
+  sync)  cd "$ENGINE" || exit 1
+         git add -A
+         if git diff --cached --quiet; then echo "没有改动，无需同步"; exit 0; fi
+         git commit -q -m "自动同步 $(date +'%Y-%m-%d %H:%M')"
+         git push
+         echo "已同步到 https://github.com/Jessper2024/epub-factory" ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;

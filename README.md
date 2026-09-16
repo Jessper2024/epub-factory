@@ -98,6 +98,15 @@ cd ~/Life/EPUB制作/_engine
   （号名「猫笔刀」≠ 目录「猫刀笔」）。
 - 详细规则与踩坑见 skill 的 `references/operations.md` 和本目录 `PROJECT_NOTES.md`。
 
+## GitHub 私有仓库
+
+代码备份在 https://github.com/Jessper2024/epub-factory（**private**，只有账号主人可见）。
+
+- 只放代码与文档，**书籍数据一律不上传**：`xhtml/`、`原始HTML/`、`*.epub`、封面都在仓库之外
+  （文章是他人作品，有版权顾虑，体积也大，不适合进版本库）。
+- 改动后同步：`./epub.sh sync`（自动 commit + push）。
+- 换电脑取回：`git clone git@github.com:Jessper2024/epub-factory.git _engine`，再 `pip install lxml Pillow requests`。
+
 ## 依赖
 
 ```bash
