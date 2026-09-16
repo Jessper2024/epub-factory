@@ -531,8 +531,34 @@ def build_opf(book_title: str, author: str, uid: str, items: list[tuple[str, str
     return opf
 
 
-def build_book(account: str, book_dir: Path) -> Path | None:
-    """book_dir 就是该号的独立文件夹；原始文档在 xhtml/ 里，产物写回文件夹根。"""
+def years_in(book_dir: Path) -> list[int]:
+    """该号源文件覆盖了哪些年份（决定是否分册）。"""
+    years = set()
+    for f in source_dir(book_dir).glob("*.xhtml"):
+        m = DATE_RE.match(f.stem.replace("-Sigil", ""))
+        if m:
+            years.add(int(m.group(1)))
+    return sorted(years)
+
+
+def build_all(account: str, book_dir: Path, split_year: bool = False) -> list[Path]:
+    """出一本还是按年出多本。split_year=True 时每年一本（号名_2025.epub、号名_2026.epub）。"""
+    if not split_year:
+        one = build_book(account, book_dir)
+        return [one] if one else []
+    outs = []
+    for year in years_in(book_dir):
+        out = build_book(account, book_dir, year=year)
+        if out:
+            outs.append(out)
+    return outs
+
+
+def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | None:
+    """book_dir 就是该号的独立文件夹；原始文档在 xhtml/ 里，产物写回文件夹根。
+
+    year 指定时只收该年的月份（用于按年分册）。
+    """
     src_dir = source_dir(book_dir)
     out_dir = book_dir
     # 先把源 xhtml 里误判的标题降级，保证源文件与合订 EPUB 一致
@@ -552,9 +578,14 @@ def build_book(account: str, book_dir: Path) -> Path | None:
     # 按月分组，保持从旧到新
     months: list[tuple[str, str, list[Article]]] = []
     for art in arts:
+        if year is not None and not art.month_key.startswith(str(year)):
+            continue
         if not months or months[-1][0] != art.month_key:
             months.append((art.month_key, art.month_label, []))
         months[-1][2].append(art)
+    if not months:
+        log("  %s：%s 年没有文章，跳过" % (account, year))
+        return None
 
     anchor_ids: dict[int, str] = {}
     counter = [0]
@@ -668,9 +699,13 @@ def build_book(account: str, book_dir: Path) -> Path | None:
 
 
 # ---------------------------------------------------------------- 归档新文件
+STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0}
+
+
 def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
     """归档文件到对应号的 xhtml/ 目录。
 
+    单篇失败不会中断整批：原因记进 STATS["failed"]，最后汇总进处理报告。
     archive_original=True 时，转换完成的原始 HTML 会被移到 <号>/原始HTML/ 备份
     （收件箱流程用，避免同一批文件被重复处理）。
     """
@@ -680,64 +715,80 @@ def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
         if not p.is_file():
             log("不存在，跳过：", p)
             continue
-        suffix = p.suffix.lower()
-        if suffix in (".html", ".htm"):
-            account = detect_account_from_html(p)
-            if not account:
-                log("无法识别公众号，跳过：", p.name)
-                continue
-            dest_dir = resolve_dir(account)
-            sys.path.insert(0, str(SIGI_DIR))
-            import sigi_convert as S
-            from lxml import html as LH
-            src = LH.fromstring(p.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
-            title = S._article_title_from_source(src)
-            date_text, base = title.split("_", 1) if "_" in title else ("", title)
-            author = S._first_text_by_id(src, "js_author_name") or S._author_from_source(src)
-            stem = "_".join(x for x in (date_text, account, author, base) if x)
-            target_dir = source_dir(dest_dir)
-            dest = target_dir / (S.output_stem_for_title(stem) + "-Sigil.xhtml")
-            if dest.exists():
-                log("已存在，跳过：", dest.name)
-            else:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                cleaned, n_promo = strip_promo_from_html(p)
-                try:
-                    log("转换：%s → %s/%s/%s" % (
-                        p.name, dest_dir.name, XHTML_SUBDIR,
-                        "（删推广图 %d 张）" % n_promo if n_promo else ""))
-                    if not dry_run:
-                        S.convert(cleaned, dest, "wechat", False)
-                finally:
-                    if cleaned != p:
-                        cleaned.unlink(missing_ok=True)
-            if not dry_run and archive_original:
-                raw_dir = dest_dir / RAW_SUBDIR
-                raw_dir.mkdir(parents=True, exist_ok=True)
-                raw_dest = raw_dir / p.name
-                if raw_dest.exists():
-                    log("原 HTML 已备份过，删除收件箱副本：", p.name)
-                    p.unlink()
-                else:
-                    shutil.move(str(p), str(raw_dest))
-                    log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
-            touched[dest_dir.name] = dest_dir
-        elif suffix == ".xhtml":
-            account = detect_account_from_xhtml(p) or p.parent.name
-            dest_dir = resolve_dir(account)
-            target_dir = source_dir(dest_dir)
-            dest = target_dir / p.name
-            if dest.exists():
-                log("已存在，跳过：", dest.name)
-            else:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                log("归档：%s → %s/%s/" % (p.name, dest_dir.name, XHTML_SUBDIR))
-                if not dry_run:
-                    shutil.copy2(p, dest)
-            touched[dest_dir.name] = dest_dir
-        else:
-            log("不支持的类型，跳过：", p.name)
+        try:
+            _add_one(p, archive_original, dry_run, touched)
+        except Exception as exc:  # noqa: BLE001 单篇炸了也要把剩下的处理完
+            STATS["failed"].append("%s → %s: %s" % (p.name, type(exc).__name__, exc))
+            log("  失败，已跳过：", p.name, "->", type(exc).__name__, exc)
     return touched
+
+
+def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> None:
+    """处理单个文件：识别号 → 转 XHTML → 归档 → 备份原 HTML。"""
+    suffix = p.suffix.lower()
+    if suffix in (".html", ".htm"):
+        account = detect_account_from_html(p)
+        if not account:
+            STATS["skipped"].append("%s（认不出公众号）" % p.name)
+            log("无法识别公众号，跳过：", p.name)
+            return
+        dest_dir = resolve_dir(account)
+        sys.path.insert(0, str(SIGI_DIR))
+        import sigi_convert as S
+        from lxml import html as LH
+        src = LH.fromstring(p.read_bytes(), parser=LH.HTMLParser(encoding="utf-8"))
+        title = S._article_title_from_source(src)
+        date_text, base = title.split("_", 1) if "_" in title else ("", title)
+        author = S._first_text_by_id(src, "js_author_name") or S._author_from_source(src)
+        stem = "_".join(x for x in (date_text, account, author, base) if x)
+        target_dir = source_dir(dest_dir)
+        dest = target_dir / (S.output_stem_for_title(stem) + "-Sigil.xhtml")
+        if dest.exists():
+            STATS["skipped"].append("%s（已有同名，内容相同）" % dest.name)
+            log("已存在，跳过：", dest.name)
+        else:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            cleaned, n_promo = strip_promo_from_html(p)
+            STATS["promo"] += n_promo
+            try:
+                log("转换：%s → %s/%s/%s" % (
+                    p.name, dest_dir.name, XHTML_SUBDIR,
+                    "（删推广图 %d 张）" % n_promo if n_promo else ""))
+                if not dry_run:
+                    S.convert(cleaned, dest, "wechat", False)
+                    STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
+            finally:
+                if cleaned != p:
+                    cleaned.unlink(missing_ok=True)
+        if not dry_run and archive_original:
+            raw_dir = dest_dir / RAW_SUBDIR
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            raw_dest = raw_dir / p.name
+            if raw_dest.exists():
+                log("原 HTML 已备份过，删除收件箱副本：", p.name)
+                p.unlink()
+            else:
+                shutil.move(str(p), str(raw_dest))
+                log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
+        touched[dest_dir.name] = dest_dir
+    elif suffix == ".xhtml":
+        account = detect_account_from_xhtml(p) or p.parent.name
+        dest_dir = resolve_dir(account)
+        target_dir = source_dir(dest_dir)
+        dest = target_dir / p.name
+        if dest.exists():
+            STATS["skipped"].append("%s（已有同名）" % dest.name)
+            log("已存在，跳过：", dest.name)
+        else:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            log("归档：%s → %s/%s/" % (p.name, dest_dir.name, XHTML_SUBDIR))
+            if not dry_run:
+                shutil.copy2(p, dest)
+                STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
+        touched[dest_dir.name] = dest_dir
+    else:
+        STATS["skipped"].append("%s（不支持的类型）" % p.name)
+        log("不支持的类型，跳过：", p.name)
 
 
 # ---------------------------------------------------------------- 入口
@@ -886,15 +937,58 @@ def tidy_sources(book_dir: Path) -> int:
     return changed_total
 
 
+# 浏览器（OpenClaw / SingleFile）存 HTML 的地方，收件箱流程会先去这些目录把新文件吸进来。
+# 目录不存在就自动跳过；想加新的源直接往这里加一行。
+EXTRA_SOURCES = [
+    Path("~/Downloads/微信公众号下载").expanduser(),
+    ROOT / "微信公众号下载",
+]
+
+
+def already_archived(name: str) -> bool:
+    """该 HTML 是不是已经备份进某号的 原始HTML/ 了。"""
+    for book in collect_book_dirs():
+        if (book / RAW_SUBDIR / name).exists():
+            return True
+    return False
+
+
+def harvest_sources(inbox: Path) -> int:
+    """把浏览器存 HTML 的目录（OpenClaw / SingleFile 输出）里的新文件吸进收件箱。
+
+    原文件保留不动；已经在 原始HTML/ 里备份过的直接跳过，所以可以反复跑。
+    """
+    got = 0
+    for src in EXTRA_SOURCES:
+        if not src.is_dir():
+            continue
+        files = [f for f in sorted(src.iterdir())
+                 if f.is_file() and f.suffix.lower() in (".html", ".htm")
+                 and not f.name.startswith(".")]
+        if not files:
+            continue
+        log("附加源 %s 有 %d 个文件" % (src.name, len(files)))
+        for f in files:
+            if already_archived(f.name) or (inbox / f.name).exists():
+                continue
+            shutil.copy2(f, inbox / f.name)
+            got += 1
+            log("  吸入：", f.name)
+    return got
+
+
 def process_inbox(inbox: Path) -> dict[str, Path]:
     """扫描收件箱：识别博主 → 转 XHTML 归档 → 原始 HTML 备份 → 重建受影响的 EPUB。
 
     按博主和日期自动分流到各自文件夹，一本 EPUB 只收自己号的文章。
+    默认收件箱会先把 EXTRA_SOURCES（浏览器存 HTML 的目录）里的新文件吸进来。
     """
     if not inbox.is_dir():
         log("收件箱不存在，先建一个：", inbox)
         inbox.mkdir(parents=True, exist_ok=True)
         return {}
+    if inbox == INBOX_DIR:
+        harvest_sources(inbox)
     files = sorted(p for p in inbox.iterdir()
                    if p.is_file() and p.suffix.lower() in (".html", ".htm", ".xhtml")
                    and not p.name.startswith("."))
@@ -911,6 +1005,112 @@ def process_inbox(inbox: Path) -> dict[str, Path]:
     return touched
 
 
+def epub_stats(epub: Path) -> dict:
+    """从成品 EPUB 读出可核对的数字：月份数、文章数、目录条目数、体积。"""
+    stats = {"size_mb": round(epub.stat().st_size / 1048576, 1),
+             "months": 0, "articles": 0, "toc": 0, "parts": 0}
+    try:
+        with zipfile.ZipFile(epub) as z:
+            names = z.namelist()
+            for n in names:
+                if "/Text/part" in n:
+                    stats["parts"] += 1
+                    root = etree.fromstring(z.read(n))
+                    stats["months"] += len(root.findall(f".//{{{XHTML_NS}}}h1"))
+                    stats["articles"] += len(root.findall(f".//{{{XHTML_NS}}}h2"))
+            nav_name = next((n for n in names if n.endswith("nav.xhtml")), None)
+            if nav_name:
+                nav = etree.fromstring(z.read(nav_name))
+                stats["toc"] = len(nav.findall(f".//{{{XHTML_NS}}}li"))
+    except Exception as exc:  # noqa: BLE001
+        stats["error"] = "%s: %s" % (type(exc).__name__, exc)
+    return stats
+
+
+def book_span(book: Path) -> tuple[str, str, int]:
+    """该号 xhtml 的时间跨度与篇数（从文件名日期解析）。"""
+    files = sorted(source_dir(book).glob("*.xhtml"))
+    keys = []
+    for f in files:
+        m = DATE_RE.match(f.stem.replace("-Sigil", ""))
+        if m:
+            keys.append((int(m.group(1)), int(m.group(2))))
+    if not keys:
+        return "—", "—", len(files)
+    keys.sort()
+    return ("%04d-%02d" % keys[0], "%04d-%02d" % keys[-1], len(files))
+
+
+def refresh_ledger() -> Path:
+    """刷新 ~/Life/EPUB制作/_台账.md——所有书的一览，随时能看清家底。"""
+    path = ROOT / "_台账.md"
+    lines = ["# 成书台账", "",
+             "由 build_epub.py 自动刷新，别手改（改了会被覆盖）。", "",
+             "| 公众号 | 篇数 | 跨度 | 成品 | 体积 | 目录条目 | 最后更新 |",
+             "|---|---:|---|---|---:|---:|---|"]
+    total = 0
+    for book in collect_book_dirs():
+        epubs = sorted(book.glob("*.epub"))
+        first, last, count = book_span(book)
+        if not epubs:
+            lines.append("| %s | %d | %s ~ %s | （未成书） | — | — | — |"
+                         % (book.name, count, first, last))
+            continue
+        total += count
+        for i, ep in enumerate(epubs):
+            st = epub_stats(ep)
+            mtime = dt.datetime.fromtimestamp(ep.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            lines.append("| %s | %s | %s ~ %s | %s | %.1fMB | %d | %s |" % (
+                book.name if i == 0 else "", count if i == 0 else "",
+                first if i == 0 else "", last if i == 0 else "",
+                ep.name, st["size_mb"], st["toc"], mtime))
+    lines += ["", "合计 %d 篇。" % total,
+              "体检：`cd _engine && ./epub.sh check`　回归：`./epub.sh test`", ""]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def write_report(built: list[str]) -> Path:
+    """把这次运行干了什么写成 _处理报告.md，方便事后回看。"""
+    path = ROOT / "_处理报告.md"
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = ["# 处理报告", "", "- 时间：%s" % now,
+             "- 新增归档：%d" % len(STATS["added"]),
+             "- 跳过重复：%d" % len(STATS["skipped"]),
+             "- 失败：%d" % len(STATS["failed"]),
+             "- 删除推广图：%d 张" % STATS["promo"], ""]
+    for title, items in (("新增", STATS["added"]), ("跳过", STATS["skipped"]),
+                         ("失败", STATS["failed"])):
+        if not items:
+            continue
+        lines.append("## %s（%d）" % (title, len(items)))
+        lines += ["- %s" % x for x in items]
+        lines.append("")
+    if built:
+        lines.append("## 重建的书")
+        for name in built:
+            book = ROOT / name
+            epubs = sorted(book.glob("*.epub"))
+            for ep in epubs:
+                st = epub_stats(ep)
+                lines.append("- **%s**：%d 篇 / %d 个月 / 目录 %d 条 / %.1fMB"
+                             % (ep.name, st["articles"], st["months"], st["toc"], st["size_mb"]))
+        lines.append("")
+    if not STATS["added"] and not STATS["failed"]:
+        lines.append("（这次没有新增，只是重跑了一遍。）")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    log("处理报告 →", path.name)
+    return path
+
+
+def finish(built: list[str]) -> None:
+    """收尾：写处理报告 + 刷新台账，让每次运行都留痕。"""
+    write_report(built)
+    refresh_ledger()
+    log("台账 →", "_台账.md")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="把 Sigil XHTML 合成按月分章的 EPUB")
     ap.add_argument("--only", help="只重建指定公众号（目录名）")
@@ -918,20 +1118,22 @@ def main() -> int:
     ap.add_argument("--inbox", nargs="?", const=str(INBOX_DIR),
                     help="扫描收件箱并分流处理（默认 %s）" % INBOX_DIR)
     ap.add_argument("--list", action="store_true", help="只扫描不打包")
+    ap.add_argument("--split-year", action="store_true",
+                    help="按年分册（号名_2025.epub、号名_2026.epub），书太大时用")
     args = ap.parse_args()
 
     if args.inbox:
-        process_inbox(Path(args.inbox).expanduser().resolve())
+        touched = process_inbox(Path(args.inbox).expanduser().resolve())
+        finish(list(touched))
         return 0
 
     if args.add:
         touched = add_files([Path(x) for x in args.add])
-        if not touched:
-            return 1
         for account, directory in touched.items():
             log("重建：", account)
             build_book(account, directory)
-        return 0
+        finish(list(touched))
+        return 1 if not touched else 0
 
     if args.only:
         dirs = [ROOT / args.only]
@@ -942,6 +1144,7 @@ def main() -> int:
         log("没有找到公众号目录：", ROOT)
         return 1
 
+    built: list[str] = []
     for d in dirs:
         if not d.is_dir():
             log("目录不存在：", d)
@@ -954,7 +1157,9 @@ def main() -> int:
                 log("   ", a.month_label, "|", a.title)
             continue
         log("构建：", d.name)
-        build_book(d.name, d)
+        if build_all(d.name, d, split_year=args.split_year):
+            built.append(d.name)
+    finish(built)
     return 0
 
 

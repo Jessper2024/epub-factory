@@ -28,6 +28,8 @@ case "$cmd" in
          else exec "$PY" "$ENGINE/build_epub.py" --inbox; fi ;;
   add)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --add "$@" ;;
   list)  exec "$PY" "$ENGINE/build_epub.py" --list ;;
+  test)  exec "$PY" "$ENGINE/regress.py" "$@" ;;
+  split) exec "$PY" "$ENGINE/build_epub.py" --split-year "$@" ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
