@@ -3,6 +3,7 @@
 #   ./epub.sh             全部公众号重建
 #   ./epub.sh only 猫刀笔   只重建某一本
 #   ./epub.sh inbox       扫描收件箱 _待处理/ 并分流重建
+#                         加 --min-articles 10 可临时改首次成书门槛（默认 30 篇）
 #   ./epub.sh add a.html  归档指定文件并重建对应 EPUB
 #   ./epub.sh list        只看扫描结果，不打包
 #   ./epub.sh check       交付前体检（源 xhtml + EPUB 双向校验）
@@ -19,7 +20,7 @@ PY="$ENGINE/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -29,8 +30,7 @@ shift || true
 case "$cmd" in
   all)   exec "$PY" "$ENGINE/build_epub.py" "$@" ;;
   only)  [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --only "$@" ;;
-  inbox) if [ $# -ge 1 ]; then exec "$PY" "$ENGINE/build_epub.py" --inbox "$@"
-         else exec "$PY" "$ENGINE/build_epub.py" --inbox; fi ;;
+  inbox) exec "$PY" "$ENGINE/build_epub.py" --inbox "$@" ;;
   add)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --add "$@" ;;
   list)  exec "$PY" "$ENGINE/build_epub.py" --list ;;
   test)  exec "$PY" "$ENGINE/regress.py" "$@" ;;

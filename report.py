@@ -214,7 +214,12 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
             f'<div class="epub"><span class="mono">{html.escape(e["name"])}</span>'
             f'<span class="pill">{e["articles"]} 篇 · {e["months"]} 月 · 目录 {e["toc"]}</span>'
             f'<span class="pill grey">{e["size_mb"]}MB · {e["mtime"]}</span></div>'
-            for e in a["epubs"]) or '<div class="muted">还没有成品（源文件缺失时无法重建）</div>'
+            for e in a["epubs"])
+        if not epubs:
+            # 分清「没攒够篇数」和「压根没源」——前者是正常的，后者才要人管
+            why = B.publish_blocked(Path(a["dir"]))
+            epubs = (f'<div class="muted">暂未成书：{html.escape(why)}</div>' if why
+                     else '<div class="muted">还没有成品（源文件缺失时无法重建）</div>')
         cov = (f'<img class="cover" src="{a["cover"]}" alt="{html.escape(a["account"])} 封面"/>'
                if a["cover"] else '<div class="cover none">无封面</div>')
         mini = svg_bars([(m[2:].replace("-", "/"),

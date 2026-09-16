@@ -715,7 +715,28 @@ def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | 
 
 # ---------------------------------------------------------------- 归档新文件
 STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
-               "promo_candidates": []}
+               "promo_candidates": [], "held": []}
+
+# 首次成书门槛（陈少 2026-09-16 定）：一个号攒够这么多篇 XHTML 才出第一本书。
+# 只挡「自动流程首次成书」——已有成品的书照常跟着新增更新，不会因为门槛而停更；
+# 手动点名（--only / --add / 全量）一律无视门槛。改门槛：--min-articles N。
+MIN_PUBLISH = 30
+
+
+def publish_blocked(book_dir: Path) -> str | None:
+    """该号是否因为「篇数没攒够」而暂不成书。返回原因，可成书则返回 None。
+
+    只看首次成书：已经有 epub 的书不受门槛约束（否则书会停在旧版本，没人看得出来）。
+    """
+    if MIN_PUBLISH <= 0:
+        return None
+    if any(book_dir.glob("*.epub")):
+        return None
+    src = source_dir(book_dir)
+    n = len([p for p in src.glob("*.xhtml") if p.is_file()])
+    if n >= MIN_PUBLISH:
+        return None
+    return "源 %d 篇，未达首次成书门槛 %d 篇（差 %d 篇）" % (n, MIN_PUBLISH, MIN_PUBLISH - n)
 
 
 def add_files(paths: list[Path], archive_original: bool = False, dry_run=False):
@@ -995,6 +1016,11 @@ def process_inbox(inbox: Path) -> dict[str, Path]:
     if not touched:
         return {}
     for account, directory in touched.items():
+        why = publish_blocked(directory)
+        if why:
+            log("  暂不成书：%s（%s）" % (account, why))
+            STATS["held"].append("%s：%s" % (account, why))
+            continue
         log("重建：", account)
         build_book(account, directory)
     return touched
@@ -1048,8 +1074,10 @@ def refresh_ledger() -> Path:
         epubs = sorted(book.glob("*.epub"))
         first, last, count = book_span(book)
         if not epubs:
-            lines.append("| %s | %d | %s ~ %s | （未成书） | — | — | — |"
-                         % (book.name, count, first, last))
+            why = publish_blocked(book)
+            note = ("（未成书·差 %d 篇）" % (MIN_PUBLISH - count)) if why else "（未成书）"
+            lines.append("| %s | %d | %s ~ %s | %s | — | — | — |"
+                         % (book.name, count, first, last, note))
             continue
         total += count
         for i, ep in enumerate(epubs):
@@ -1073,7 +1101,14 @@ def write_report(built: list[str]) -> Path:
              "- 新增归档：%d" % len(STATS["added"]),
              "- 跳过重复：%d" % len(STATS["skipped"]),
              "- 失败：%d" % len(STATS["failed"]),
+             "- 暂缓成书：%d（篇数没攒够，等够了自动出书）" % len(STATS["held"]),
              "- 删除推广图：%d 张" % STATS["promo"], ""]
+    if STATS["held"]:
+        lines += ["## 暂缓成书（%d）" % len(STATS["held"]),
+                  "源文件已经归档进 `xhtml/` 了，只是还没到首次成书门槛，所以这次没打包。",
+                  "等篇数攒够会自动出书；想立刻出就跑 `./epub.sh only <号名>`。", ""]
+        lines += ["- %s" % x for x in STATS["held"]]
+        lines.append("")
     if STATS["promo_candidates"]:
         lines += ["## 疑似推广图（待确认）",
                   "跨文章重复出现在文末，已列为候选。看过确认后跑 `./epub.sh ads --promote-all`。",
@@ -1145,6 +1180,7 @@ def finish(built: list[str]) -> None:
 
 
 def main() -> int:
+    global MIN_PUBLISH
     ap = argparse.ArgumentParser(description="把 Sigil XHTML 合成按月分章的 EPUB")
     ap.add_argument("--only", help="只重建指定公众号（目录名）")
     ap.add_argument("--add", nargs="+", help="归档新文件（.xhtml 或 .html）并重建对应 EPUB")
@@ -1155,7 +1191,11 @@ def main() -> int:
                     help="按年分册（号名_2025.epub、号名_2026.epub），书太大时用")
     ap.add_argument("--backfill-ads", action="store_true",
                     help="把已归档的 原始HTML/ 全扫一遍补记图片账（不转换、不改书）")
+    ap.add_argument("--min-articles", type=int, default=MIN_PUBLISH,
+                    help="首次成书门槛（源 XHTML 篇数），默认 %d；0 = 不设门槛" % MIN_PUBLISH)
     args = ap.parse_args()
+
+    MIN_PUBLISH = max(0, args.min_articles)
 
     if args.backfill_ads:
         n_files, n_cands = backfill_ads()
@@ -1165,7 +1205,9 @@ def main() -> int:
 
     if args.inbox:
         touched = process_inbox(Path(args.inbox).expanduser().resolve())
-        finish(list(touched))
+        # 只有真的出了书的才算「重建」，被门槛挡下的进报告里的「暂缓成书」
+        built = [a for a, d in touched.items() if not publish_blocked(d)]
+        finish(built)
         return 0
 
     if args.add:
