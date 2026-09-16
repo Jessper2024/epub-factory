@@ -51,10 +51,17 @@ case "$cmd" in
   backup) exec "$ENGINE/backup.sh" "$@" ;;
   sync)  cd "$ENGINE" || exit 1
          git add -A
-         if git diff --cached --quiet; then echo "没有改动，无需同步"; exit 0; fi
-         git commit -q -m "自动同步 $(date +'%Y-%m-%d %H:%M')"
-         git push
-         echo "已同步到 https://github.com/Jessper2024/epub-factory" ;;
+         # 本次没改动也要推：上次可能"提交成功、推送失败"（GitHub 偶发 500），
+         # 留下 ahead 的本地提交。不推就会一直以为同步过了，其实远端是旧的。
+         if ! git diff --cached --quiet; then
+           git commit -q -m "自动同步 $(date +'%Y-%m-%d %H:%M')"
+         fi
+         if git push; then
+           echo "已同步到 https://github.com/Jessper2024/epub-factory"
+         else
+           echo "✗ 推送失败（网络或 GitHub 故障）。本地提交已保留，稍后重跑 ./epub.sh sync"
+           exit 1
+         fi ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
