@@ -19,7 +19,7 @@ LOG_DIR="$HOME/Library/Logs"
 LOG="$LOG_DIR/epub-inbox.log"
 UID_NUM="$(id -u)"
 INTERVAL="${INBOX_INTERVAL:-3600}"      # 秒；默认 1 小时
-WATCH="$HOME/Downloads/微信公众号下载"
+WATCH="/Users/jessper/Life/01、源料_微信公众号下载"
 
 cmd_install() {
   mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"

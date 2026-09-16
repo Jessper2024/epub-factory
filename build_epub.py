@@ -1004,9 +1004,10 @@ def tidy_sources(book_dir: Path) -> int:
     return changed_total
 
 
-# 只盯这一个文件夹（陈少 2026-09-16 定）：新文章存这里，定时任务每小时收一次。
-# 这个文件夹以外的任何地方都不碰。目录里再套一层子文件夹也能收到（SCAN_SUBDIRS）。
-WATCH_DIR = Path("~/Downloads/微信公众号下载").expanduser()
+# 只盯这一个文件夹（陈少 2026-09-16 定，2026-09-16 下午更新）：
+# 新文章存这里，定时任务每小时收一次。这个文件夹以外的任何地方都不碰。
+# 目录里再套一层子文件夹也能收到（SCAN_SUBDIRS）。
+WATCH_DIR = Path("/Users/jessper/Life/01、源料_微信公众号下载")
 SCAN_SUBDIRS = 1
 EXTRA_SOURCES = [WATCH_DIR]
 

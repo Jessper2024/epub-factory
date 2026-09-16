@@ -1,79 +1,81 @@
-# 项目长期约定（微信文章抓取 → EPUB）
+# 项目长期约定与决策档案
 
-## 项目位置（2026-09-16 定案，长期不变）
+> **分工**：怎么用 → `README.md`；详细规则与踩坑 → skill 的
+> `references/operations.md`（唯一出处）；本文件只记**为什么这样设计**和**不能碰的不变量**。
 
-- **代码**：`~/Life/EPUB制作/_engine/`（本目录，带 git 和自建 venv）
+## 位置与不变量（2026-09-16 定案，长期不变）
+
+- **代码**：`~/Life/EPUB制作/_engine/`（本目录，带 git 和自建 `.venv`）
 - **数据**：`~/Life/EPUB制作/<号名>/`（xhtml/ · 原始HTML/ · cover.jpg · epub）
-- **收件箱**：`~/Life/EPUB制作/_待处理/`；**盯的下载文件夹**：`~/Downloads/微信公众号下载`（只这一个）
+- **收件箱**：`~/Life/EPUB制作/_待处理/`
+- **源料文件夹（只盯这一个）**：`/Users/jessper/Life/01、源料_微信公众号下载`
 - **新号待确认**：`~/Life/EPUB制作/_待确认新号/<号名>/`（`./epub.sh allow 号名` 才收）
 - **skill**：`~/.workbuddy/skills/epub-factory/`（用户级，任何会话自动可见）
-- **唯一入口**：`~/Life/EPUB制作/_engine/epub.sh`
-  （`./epub.sh` / `only` / `inbox [--dry-run]` / `allow 号名` / `auto install` / `add` / `list` /
-  `check` / `toc` / `report` / `dash` / `ads` / `backfill` / `test` / `sync`）
-- **不要把长期资产放进 `~/WorkBuddy/<时间戳>/` 或 `~/Documents/Codex/<日期>/`**——会话级临时目录，会越堆越多、随时被清。
-- 依赖装在 `_engine/.venv`，不再依赖 WorkBuddy 的托管 venv。
+- **GitHub**：https://github.com/Jessper2024/epub-factory（public，只推代码不推数据）
+- **云端看板**：https://jessper2024.github.io/epub-factory/
+- **唯一入口**：`./epub.sh`；依赖装在本目录 `.venv`，不依赖 WorkBuddy 托管 venv。
+- **不要把长期资产放进 `~/WorkBuddy/<时间戳>/` 或 `~/Documents/Codex/<日期>/`**——会话级临时目录。
 
-## 工作流（陈少 2026-09-16 拍板）
-- 陈少给微信文章链接 → 我**直接解析处理**，不来回追问。
-- 处理链：`fetch_links.py`（抓链接正文 HTML 落 raw_html/）→ `html_to_epub.py`（合成 EPUB）。
-  - 单篇链接可直接当参数：`python3 fetch_links.py url1 url2 ...`
-- 正文提取：标题 `og:title` / 日期 `var ct` 时间戳 / 正文 `<div id="js_content">`；`lxml` 洗成良构 XHTML。
+## 不能碰的不变量（改了必出事，每条都有事故背书）
 
-## 微信风控规律（已实测，重要）
+1. **标题判定只有一处**：`normalize_headings()`（`parse_article` 与 `tidy_sources` 共用）。
+   改标题规则只改这一个函数。
+2. **已有成品的号不受 30 篇成书门槛约束**——`publish_blocked()` 第一步查 `*.epub`，
+   有成品直接放行。这条豁免是陈少原话定案的（"已经生成的就算了"），去掉会让 4 本老书全部停更。
+3. **手动点名一律无视门槛**（`--only` / `--add` / 全量）——这是陈少的出口，锁住他就用不了系统。
+4. **文件名绝不能有 ASCII `%`**：libxml2 把路径当 URI，读写不对称（`%`→`%25`→`%2525`）。
+   `output_stem_for_title`/`safe_stem` 把 `%` 换全角 `％`；XML 写盘一律走文件句柄。
+5. **判重按内容不按文件名**：`content_fingerprints()` 双键（`sn` + 标题·`var ct`），
+   任一命中即同篇。先算先登记再判"收过没有"。陈少拍板：残余盲区人工审核兜底，**不再加固**。
+6. **只推代码不推数据**到 GitHub：`xhtml/`、`原始HTML/`、`*.epub` 永远在仓库外。
+   例外：`index.html`（云端看板报表，聚合统计不含原文）与 `.nojekyll`。
+7. **h1=月份、h2=「日期：标题」、h3=文内小标题，从旧到新，三级目录 nav+ncx 都写**——陈少定案格式。
+8. **源文件与 EPUB 目录必须一致**：打包前 `tidy_sources()` 就地规范 `xhtml/`（幂等）。
+   陈少要求 Sigil 里打开源文件看到的目录 = EPUB 目录。
+
+## 关键决策记录
+
+| 日期 | 决策 | 理由 |
+|---|---|---|
+| 2026-09-16 | 代码收拢到 `~/Life/EPUB制作/_engine/`，自带 `.venv` | 会话临时目录会失效，新会话"找不着" |
+| 2026-09-16 | skill 搬到 `~/.workbuddy/skills/epub-factory/`（用户级） | 任何会话自动可见，跨会话唯一载体 |
+| 2026-09-16 | 收件箱 + 分流 + 只重建受影响的书 | 原文件保留，已备份过的跳过（幂等） |
+| 2026-09-16 | 首次成书门槛 30 篇，老号豁免 | 防随手存的号污染书库，又不锁死老书 |
+| 2026-09-16 | 新号闸门 `_待确认新号/` + `allow` 点名 | 避免随手存的别家号混进书库 |
+| 2026-09-16 | 本地看板按需刷新不自刷 | 陈少明确"别实时扫描" |
+| 2026-09-16 下午 | 源料目录迁到 `/Users/jessper/Life/01、源料_微信公众号下载` | 陈少更换存放习惯 |
+| 2026-09-16 下午 | GitHub 改 public + Pages 云端看板，每 4 小时重发 | 陈少要手机/换电脑直接看；无敏感数据 |
+| 2026-09-16 下午 | Pages 报表命名 `index.html` + `.nojekyll` | `_报表.html` 下划线开头被 Jekyll 吞（404 事故） |
+
+## 定时任务一览（两个独立 launchd）
+
+| 任务 | 命令 | 频率 | 干什么 |
+|---|---|---|---|
+| 收文 | `./epub.sh auto install` | 每小时 | 扫源料文件夹 → 分流归档 → 重建受影响的书 |
+| 云端看板 | `./epub.sh cloud install` | 每 4 小时 | 生成报表 → 复制成 index.html → push 到 Pages |
+
+**都必须在陈少本机终端装**（沙箱里 `launchctl` 被拒）。日志分别在
+`~/Library/Logs/epub-inbox.log` 与 `epub-cloud.log`。
+
+## 微信风控规律（早期抓取方案实测，备选）
+
 - **短链 `/s/CODE` 形式：服务端可抓**（移动端 UA + 自动跟重定向）。
-- **长链 `/s?__biz=..&mid=..&sn=..&chksm=..` 形式：可能触发微信「环境异常」号级风控**
-  —— 服务端 IP 被拦时返回验证页，urllib 与 WebFetch 通道都拿不到。是否被拦**按公众号 biz 而定**
-  （远川 `MzIwMDY2NTgwMA==` 长链没事；这个号 `MzE5ODk2NjUwOA==` 长链被拦）。
-- 被拦的长链**服务端硬下不来**，出路只有本机：浏览器「网页，完整」另存 HTML 丢 raw_html/，
-  或本机跑 `fetch_links.py`（本机 IP 正常、可能带登录态，能过风控）。**不要盲目后台重试，会加重风控。**
-- 待补清单：`yuanchuan_crawler/pending_links.txt`（9 个被拦长链）。
+- **长链 `/s?__biz=..` 形式：可能触发「环境异常」号级风控**——服务端 IP 被拦时返回验证页。
+  是否被拦**按公众号 biz 而定**。被拦的出路只有本机：浏览器另存 HTML 丢源料文件夹，
+  或本机跑抓取（本机 IP 正常、可能带登录态）。**不要盲目后台重试，会加重风控。**
+- 待补清单：`yuanchuan_crawler/pending_links.txt`（9 个被拦长链，早期遗留）。
 
-## 本地 HTML → Sigil XHTML（陈少主力流程，2026-09-16 定案）
-- 唯一入口：**`~/Life/EPUB制作/_engine/sigi_convert.py`**（已打懒加载补丁，
-  旧备份在 `~/Documents/Codex/2026-09-09/ze/outputs/sigi_convert.py.bak-20260916-064630`）。
-  单篇 `sigi_convert.py in.html -o out.xhtml --type wechat`；
-  整个目录用 `~/Life/EPUB制作/_engine/batch_wechat_sigil.py`（改 SRC/OUT 即可）。
-- 陈少用 OpenClaw（=SingleFile）在浏览器存微信文章，HTML 丢 `~/Downloads/微信公众号下载`；
-  成品 XHTML 落 `~/Life/EPUB制作/<号名>/`。命名 `日期_号_作者_标题-Sigil.xhtml`。
-- 我自写的 `wechat_to_sigil_xhtml.py` 已不主用（补丁并入 sigi_convert 后功能重叠），留作回退。
-- 微信懒加载图：`src` 是 1×1 SVG 占位、真图在 `data-src`，必须下载内联；`mmbiz.qpic.cn` 要文章页 Referer。
-  判定占位时**不能只看 class 含 placeholder**（嵌入后 class 不变会把真图又换回外链），详见今日日志。
-- 验收：XML 可解析 + 占位图 0 + `<br>` 0 + 外链 0。
+## 废弃/备选方案归档
 
-## XHTML → 合订 EPUB（2026-09-16 定案）
-- 脚本：`~/Life/EPUB制作/_engine/build_epub.py`（经 `epub.sh` 调用）。`--only 号` / `--add 文件...` / `--list`。
-- 约定：**每号一个独立文件夹** `~/Life/EPUB制作/<号名>/`：
-  `xhtml/`（原始文档备份）+ `cover.jpg`（封面，自动生成、可换）+ `<号名>_YYYYMM[-YYYYMM].epub`（产物）。
-  `--add` 新文件自动归到 `<号>/xhtml/`。
-- **收件箱流程**：`~/Life/EPUB制作/_待处理/` 丢待处理 HTML，`build_epub.py --inbox` 扫描 → 按号分流 →
-  转 XHTML 归档 + 原 HTML 备份到 `<号>/原始HTML/` → 只重建受影响的那几本 EPUB。
-  陈少另一个源文件夹 `EPUB制作/微信公众号下载/` 已加 SKIP_DIRS（只当收件箱用，不当号目录）。
-- **只盯一个下载文件夹，每小时自动收**（陈少 2026-09-16 定）：范围只有
-  `WATCH_DIR = ~/Downloads/微信公众号下载`（`EXTRA_SOURCES=[WATCH_DIR]`，子目录往下 1 层）。
-  `./epub.sh auto install` 装 launchd 每小时跑一次（**要在本机终端装，沙箱装不上**）。
-  三条防呆：①按内容判重（`og:url` 里的 `sn` + 标题·发布时刻，双键任一命中），
-  ②指纹必须先算先登记再判"收过没有"，③名单外新号搁 `_待确认新号/`，`./epub.sh allow 号名` 才收。
-  `./epub.sh inbox --dry-run` 预演零落地，报告进 `_处理报告_预演.md`。
-  （`SIGI_DIR` 已改成 `_engine` 自己；`sigi_convert.py` 现有两份，以 `_engine/` 里的为准。）
-- **去推广图**：`PROMO_FILE_IDS` 黑名单（戴老板 8 个 fileid，全部视觉确认），转换前按 URL 删；
-  防重复：XHTML 目标名由内容（日期+号+作者+标题）生成，同名自动跳过——源文件夹清空后再放重复文件也能识别。
-- **月份 = h1，文章标题 = h2（带日期前缀「2026年8月21日：死贵死贵的」），从旧到新**；
-  每月一个 part，文内小标题降级 h3；目录页放 spine 首位；目录文字与正文 h2 一致。
-- **目录是三级**：月份 → 文章 → h3 小标题（nav + ncx 都写，否则目录里看不到 01/02/03）。
-  空标题、超 40 字、以 `[` 开头的（参考文献）、图注（图后 ≤20 字短块）一律降级回 `<p>` 不进目录。
-- **源文件也要规范化**（陈少明确要求：Sigil 里打开源文件不能是错标题）：`build_book()` 打包前先跑
-  `tidy_sources()` 就地改写 `<号>/xhtml/*.xhtml`——标题 h1 唯一不动，其余 h1/h2 按同一套判定 → 真小标题 **h3**、其余 `<p>`。
-  合订侧对应改成 **h3 不再降 h4**（否则源文件规范后合订又降级，三级目录收不到）。幂等（跑第二次 changed=0）。
-- 交付前必跑体检：`check_epub.py [号名...]`（源 xhtml + EPUB 双向校验）、`dump_toc.py <epub>`（打印三级目录树人工看）。
-- 号名→目录必须走 `resolve_dir()` 模糊匹配（号名「猫笔刀」≠ 目录「猫刀笔」，否则会拆成两本）。
-- **元数据：作者 `dc:creator` = 公众号博主名**（不是文章笔名 moomoocat）；**排序作者恒为「沪上陈少」**
-  （`opf:file-as` + `refines meta` 两种都写，兼容 EPUB2/calibre 与 EPUB3）。
-- skill **已搬到 `~/.workbuddy/skills/epub-factory/`**（原名 html-to-sigil-converter，2026-09-16 一并改名）。
-  规则改动要同步写进 skill 的 `references/operations.md`，否则新会话读不到。
+- `yuanchuan_crawler/`：需要微信登录态的全量列表抓取（备选方案 B），当前主力是
+  OpenClaw 浏览器存快照 → 自动收文，爬虫不主用。
+- `wechat_to_sigil_xhtml.py`：早期自写转换器，懒加载补丁已并入 `sigi_convert.py`，留作回退。
+- `fetch_links.py` / `html_to_epub.py`：2026-09-16 早上的"链接抓取 → 合成 EPUB"方案，
+  已被"快照 → XHTML → 合订"取代。
 
-## 已交付
-- `html_to_epub.py`（HTML→EPUB，含本地图回退 + 图片远程下载 + XML 良构清洗）
-- `fetch_links.py`（链接批量抓取，验证页退避重试）
-- `yuanchuan_crawler.py`（需要微信登录态的全量列表抓取，备选方案 B）
-- 依赖 `lxml` 装在 managed venv：`/Users/jessper/.workbuddy/binaries/python/envs/default`
-- 已合成：`微信文章_已下4篇.epub`（4 篇短链，原貌含图）
+## 悬而未决（等陈少拍板）
+
+- **王阿三/王张三**：目录名「王阿三」，但文章里号名是「王张三」，靠 `resolve_dir()` 模糊匹配
+  兜着，脆弱。建议统一到微信原始号名（`#js_name`）。
+- **数据第二处备份**：网盘/移动硬盘未定。
+- 币须知 1 篇在 `_待确认新号/`，等点名。
