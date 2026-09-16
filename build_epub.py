@@ -30,6 +30,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
+import html
+import json
 import os
 import re
 import shutil
@@ -715,7 +718,28 @@ def build_book(account: str, book_dir: Path, year: int | None = None) -> Path | 
 
 # ---------------------------------------------------------------- 归档新文件
 STATS: dict = {"added": [], "skipped": [], "failed": [], "promo": 0,
-               "promo_candidates": [], "held": []}
+               "promo_candidates": [], "held": [],
+               "harvested": [], "non_wechat": [], "dup_fp": [], "cleanable": [],
+               "pending_accounts": []}
+
+# 认「这是不是微信公众号文章」的两个特征（正文容器 / 微信图床）
+WECHAT_MARKS = ('id="js_content"', "mmbiz.qpic.cn")
+
+# 号白名单：名单外的新号先不建书，只报告等确认（`./epub.sh allow 号名` 加进来）
+ALLOW_FILE = ENGINE_DIR / "allowed_accounts.json"
+ALLOW_ALL_ACCOUNTS = False
+
+
+def _load_allowed() -> set:
+    if not ALLOW_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(ALLOW_FILE.read_text(encoding="utf-8")).get("allow", []))
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+ALLOWED_ACCOUNTS = _load_allowed()
 
 # 成书门槛（陈少 2026-09-16 两次澄清后定）：一个号攒够这么多篇 XHTML 才出书（默认 30）。
 # 只管「还没有成品的号」——已有成品的书**不受门槛约束**，照常跟着新增更新。
@@ -772,6 +796,19 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
             STATS["skipped"].append("%s（认不出公众号）" % p.name)
             log("无法识别公众号，跳过：", p.name)
             return
+        if not account_allowed(account):
+            STATS["pending_accounts"].append("%s（识别为「%s」）" % (p.name, account))
+            hold = PENDING_DIR / safe_stem(account) / p.name
+            if hold.exists():
+                log("  新号「%s」的文件已在待确认里，跳过：%s" % (account, p.name))
+                if not dry_run:
+                    p.unlink()
+                return
+            log("  新号「%s」还没确认，先搁置：%s" % (account, p.name))
+            if not dry_run:
+                hold.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(p), str(hold))
+            return
         dest_dir = resolve_dir(account)
         sys.path.insert(0, str(SIGI_DIR))
         import sigi_convert as S
@@ -782,6 +819,7 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
         author = S._first_text_by_id(src, "js_author_name") or S._author_from_source(src)
         stem = "_".join(x for x in (date_text, account, author, base) if x)
         target_dir = source_dir(dest_dir)
+        converted = False
         dest = target_dir / (S.output_stem_for_title(stem) + "-Sigil.xhtml")
         if dest.exists():
             STATS["skipped"].append("%s（已有同名，内容相同）" % dest.name)
@@ -801,10 +839,13 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                 if not dry_run:
                     S.convert(cleaned, dest, "wechat", False)
                     STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
+                    converted = True
             finally:
                 if cleaned != p:
                     cleaned.unlink(missing_ok=True)
-        if not dry_run and archive_original:
+        # 只有真出了新的 XHTML 才备份原始 HTML。转换被「已存在」挡下说明这是重复件，
+        # 再往 原始HTML/ 塞一份只会多出对不上号的孤儿（踩过：自检时多出一份）。
+        if not dry_run and archive_original and converted:
             raw_dir = dest_dir / RAW_SUBDIR
             raw_dir.mkdir(parents=True, exist_ok=True)
             raw_dest = raw_dir / p.name
@@ -814,6 +855,8 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
             else:
                 shutil.move(str(p), str(raw_dest))
                 log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
+        elif archive_original and not dry_run:
+            p.unlink(missing_ok=True)
         touched[dest_dir.name] = dest_dir
     elif suffix == ".xhtml":
         account = detect_account_from_xhtml(p) or p.parent.name
@@ -956,58 +999,231 @@ def tidy_sources(book_dir: Path) -> int:
     return changed_total
 
 
-# 浏览器（OpenClaw / SingleFile）存 HTML 的地方，收件箱流程会先去这些目录把新文件吸进来。
-# 目录不存在就自动跳过；想加新的源直接往这里加一行。
-EXTRA_SOURCES = [
-    Path("~/Downloads/微信公众号下载").expanduser(),
-    ROOT / "微信公众号下载",
-]
+# 只盯这一个文件夹（陈少 2026-09-16 定）：新文章存这里，定时任务每小时收一次。
+# 这个文件夹以外的任何地方都不碰。目录里再套一层子文件夹也能收到（SCAN_SUBDIRS）。
+WATCH_DIR = Path("~/Downloads/微信公众号下载").expanduser()
+SCAN_SUBDIRS = 1
+EXTRA_SOURCES = [WATCH_DIR]
+
+# 「可安全清理」只提示不动手：收下来的原 HTML 都会备份到 <号>/原始HTML/，
+# 所以下载夹里那份已经是副本，陈少什么时候清都行（我们绝不删他的文件）。
+FP_FILE = ROOT / "_已归档指纹.json"
+
+# 名单外的新号：文件先搁这儿，不建书、不混进别人的书；确认后自动回到收件箱
+PENDING_DIR = ROOT / "_待确认新号"
 
 
 def already_archived(name: str) -> bool:
-    """该 HTML 是不是已经备份进某号的 原始HTML/ 了。"""
+    """该 HTML 是不是已经收过了（归档进某号的 原始HTML/，或搁在 _待确认新号/）。
+
+    搁在待确认里的也算「收过了」——不然每小时扫一次会把同一批新号文章
+    反复从下载夹搬一遍。
+    """
     for book in collect_book_dirs():
         if (book / RAW_SUBDIR / name).exists():
             return True
+    if PENDING_DIR.is_dir():
+        for hold in PENDING_DIR.iterdir():
+            if hold.is_dir() and (hold / name).exists():
+                return True
     return False
 
 
-def harvest_sources(inbox: Path) -> int:
-    """把浏览器存 HTML 的目录（OpenClaw / SingleFile 输出）里的新文件吸进收件箱。
+# ------------------------------------------------- 只盯一个文件夹：认文章 + 认重复
+def walk_html(root: Path, depth: int = SCAN_SUBDIRS) -> list[Path]:
+    """列出 root 里的 html（含往下 depth 层子目录）；跳过隐藏文件和隐藏目录。"""
+    if not root.is_dir():
+        return []
+    out: list[Path] = []
+    stack = [(root, 0)]
+    while stack:
+        d, lvl = stack.pop()
+        for p in sorted(d.iterdir()):
+            if p.name.startswith("."):
+                continue
+            if p.is_dir():
+                if lvl < depth:
+                    stack.append((p, lvl + 1))
+            elif p.suffix.lower() in (".html", ".htm"):
+                out.append(p)
+    return out
 
-    原文件保留不动；已经在 原始HTML/ 里备份过的直接跳过，所以可以反复跑。
+
+def _head_text(path: Path, limit: int = 512_000) -> str:
+    """读文件开头一段（照片 base64 都在正文里，头部足够判断特征）。"""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(limit).decode("utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def looks_like_wechat(path: Path) -> bool:
+    """判断是不是微信公众号文章。命中不了再全量读一遍，宁可慢也不漏。"""
+    head = _head_text(path)
+    if WECHAT_MARKS[0] in head or WECHAT_MARKS[1] in head:
+        return True
+    if len(head) < 512_000:
+        return False                      # 文件本来就这么大，已经全看过了
+    try:
+        full = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return WECHAT_MARKS[0] in full or WECHAT_MARKS[1] in full
+
+
+OG_TITLE_RE = re.compile(r'og:title"\s+content="([^"]*)"')
+CT_RE = re.compile(r'var\s+ct\s*=\s*"?(\d{9,10})')
+# 文章唯一 ID：只在 og:url / SingleFile 头注释里取。正文里还有大量「别人的文章」链接，
+# 全局搜第一个 sn= 会认错（踩过），所以这两处之外的 sn 一律不看。
+OG_URL_SN_RE = re.compile(r'og:url"\s+content="[^"]*?\bsn=([0-9a-f]{32})')
+SF_URL_SN_RE = re.compile(r'url:\s*https?://mp\.weixin\.qq\.com/\S{0,800}?\bsn=([0-9a-f]{32})')
+
+
+def content_fingerprints(path: Path) -> list[str]:
+    """一篇文章的判重键（可能两个）：微信文章 ID 最稳，`标题+发布时刻` 兜底。
+
+    为什么给多个键：老备份里有的没有 og:url，只能算标题键；如果一边用 sn、
+    一边用标题，两种键互相对不上，判重就漏。任一键命中就算同一篇。
+
+    踩过两回：13 篇改名副本；同一篇存了两遍（`chksm` 变了、`sn` 没变）。
+    """
+    text = _head_text(path)
+    keys: list[str] = []
+    m = OG_URL_SN_RE.search(text) or SF_URL_SN_RE.search(text[:2000])
+    if m:
+        keys.append("sn:" + m.group(1))
+    m = OG_TITLE_RE.search(text)
+    title = html.unescape(m.group(1)).strip() if m else ""
+    if not title:
+        m2 = re.search(r"var\s+msg_title\s*=\s*'([^']*)'", text)
+        title = html.unescape(m2.group(1)).strip() if m2 else ""
+    if title:
+        ct = CT_RE.search(text)
+        title = re.sub(r"\s+", "", title)
+        keys.append("tc:" + hashlib.sha1(
+            ("%s|%s" % (title, ct.group(1) if ct else "")).encode()).hexdigest()[:16])
+    return keys                  # 两个键都算不出来就返回空，退回按文件名判
+
+
+def fingerprint_index(force: bool = False, dry_run: bool = False) -> dict:
+    """已归档文章的指纹表：{指纹: "号/文件名"}。
+
+    缓存在 _已归档指纹.json；备份目录有新增（mtime 更新）就自动重建，所以不用手动维护。
+    预演（dry_run）只在内存里算，**不落盘**——预演就该不留痕。
+    """
+    raw_files = [p for b in collect_book_dirs()
+                 for p in (b / RAW_SUBDIR).glob("*.htm*")]
+    newest = max((p.stat().st_mtime for p in raw_files), default=0.0)
+    if not force and FP_FILE.exists() and FP_FILE.stat().st_mtime >= newest:
+        try:
+            return json.loads(FP_FILE.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 缓存坏了就重建
+            pass
+    idx: dict[str, str] = {}
+    for p in raw_files:
+        for fp in content_fingerprints(p):
+            idx.setdefault(fp, "%s/%s" % (p.parent.parent.name, p.name))
+    if dry_run:
+        return idx
+    try:
+        FP_FILE.write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
+        log("指纹表更新：%d 条 → %s" % (len(idx), FP_FILE.name))
+    except OSError as exc:
+        log("指纹表写不进去（不影响本次处理）：", exc)
+    return idx
+
+
+def account_allowed(account: str) -> bool:
+    """这个号收不收。已有目录的号照收；名单外的新号先不建书，等陈少点头。"""
+    if not account or ALLOW_ALL_ACCOUNTS:
+        return True
+    clean = safe_stem(account)
+    for d in collect_book_dirs():
+        if d.name == clean:
+            return True
+    for d in collect_book_dirs():          # 一字之差 / 字序颠倒（猫笔刀 vs 猫刀笔）
+        if sorted(d.name) == sorted(clean):
+            return True
+        if len(d.name) == len(clean) and sum(a != b for a, b in zip(d.name, clean)) <= 1:
+            return True
+    return clean in ALLOWED_ACCOUNTS
+
+
+def harvest_sources(inbox: Path, dry_run: bool = False) -> int:
+    """把盯着的那个文件夹里的新微信文章吸进收件箱。
+
+    下载夹里的原文件**不动**（复制，不是搬走）；已经收过的、以及换了名字的重复副本
+    都跳过。跳过的东西记进 STATS，最后由处理报告汇总出来——不静默。
     """
     got = 0
+    idx = fingerprint_index(dry_run=dry_run)
+    seen_this_run: set[str] = set()
     for src in EXTRA_SOURCES:
+        files = walk_html(src)
         if not src.is_dir():
+            log("盯的文件夹不存在，跳过：", src)
             continue
-        files = [f for f in sorted(src.iterdir())
-                 if f.is_file() and f.suffix.lower() in (".html", ".htm")
-                 and not f.name.startswith(".")]
         if not files:
+            log("盯的文件夹里没有 html：%s" % src)
             continue
-        log("附加源 %s 有 %d 个文件" % (src.name, len(files)))
+        log("盯的文件夹 %s 有 %d 个 html" % (src, len(files)))
         for f in files:
+            if not looks_like_wechat(f):
+                STATS["non_wechat"].append(str(f))
+                log("  不是微信文章，跳过：", f.name)
+                continue
+            # 指纹必须先算、先登记，再判「收过没有」——否则一个文件因为「已收过」
+            # 提前 continue，它的指纹就没进本批次集合，同篇的另一份改名副本会漏网。
+            # （踩过：AI 写了一篇存两遍，第二遍被当成新文章收进待确认。）
+            fps = content_fingerprints(f)
+            hit = next((k for k in fps if k in idx or k in seen_this_run), "")
+            if hit:
+                where = idx.get(hit) or "本批次里另一份"
+                STATS["dup_fp"].append("%s（与 %s 同篇）" % (f.name, where))
+                STATS["cleanable"].append(str(f))
+                log("  重复副本，跳过：", f.name)
+                continue
+            for k in fps:
+                seen_this_run.add(k)
             if already_archived(f.name) or (inbox / f.name).exists():
+                STATS["cleanable"].append(str(f))
+                log("  已收过，跳过：", f.name)
+                continue
+            if dry_run:
+                # 预演也要把「会收 / 会搁置」说清楚，否则预演没意义
+                acc = detect_account_from_html(f)
+                if not acc:
+                    STATS["skipped"].append("%s（认不出公众号）" % f.name)
+                    log("  [预演] 认不出公众号，会跳过：", f.name)
+                elif not account_allowed(acc):
+                    STATS["pending_accounts"].append("%s（识别为「%s」）" % (f.name, acc))
+                    log("  [预演] 新号「%s」没确认 → 正式跑会搁置：%s" % (acc, f.name))
+                else:
+                    log("  [预演] 会收：%s（→ %s）" % (f.name, acc))
+                    STATS["harvested"].append(str(f))
+                    got += 1
                 continue
             shutil.copy2(f, inbox / f.name)
-            got += 1
             log("  吸入：", f.name)
+            STATS["harvested"].append(str(f))
+            got += 1
     return got
 
 
-def process_inbox(inbox: Path) -> dict[str, Path]:
+def process_inbox(inbox: Path, dry_run: bool = False) -> dict[str, Path]:
     """扫描收件箱：识别博主 → 转 XHTML 归档 → 原始 HTML 备份 → 重建受影响的 EPUB。
 
     按博主和日期自动分流到各自文件夹，一本 EPUB 只收自己号的文章。
-    默认收件箱会先把 EXTRA_SOURCES（浏览器存 HTML 的目录）里的新文件吸进来。
+    默认收件箱会先把 WATCH_DIR（紧盯着的那一个文件夹）里的新文章吸进来。
+    dry_run=True 时只报告、不落地任何文件、不打包。
     """
     if not inbox.is_dir():
         log("收件箱不存在，先建一个：", inbox)
         inbox.mkdir(parents=True, exist_ok=True)
         return {}
     if inbox == INBOX_DIR:
-        harvest_sources(inbox)
+        harvest_sources(inbox, dry_run=dry_run)
     files = sorted(p for p in inbox.iterdir()
                    if p.is_file() and p.suffix.lower() in (".html", ".htm", ".xhtml")
                    and not p.name.startswith("."))
@@ -1015,7 +1231,10 @@ def process_inbox(inbox: Path) -> dict[str, Path]:
         log("收件箱是空的：", inbox)
         return {}
     log("收件箱 %s 有 %d 个文件" % (inbox.name, len(files)))
-    touched = add_files(files, archive_original=True)
+    touched = add_files(files, archive_original=True, dry_run=dry_run)
+    if dry_run:
+        log("（预演模式：一份文件都没落地，也没打包）")
+        return {}
     if not touched:
         return {}
     for account, directory in touched.items():
@@ -1097,15 +1316,40 @@ def refresh_ledger() -> Path:
 
 
 def write_report(built: list[str]) -> Path:
-    """把这次运行干了什么写成 _处理报告.md，方便事后回看。"""
-    path = ROOT / "_处理报告.md"
+    """把这次运行干了什么写成 _处理报告.md，方便事后回看。
+
+    预演另存 _处理报告_预演.md：预演不该抹掉「上次正式执行」的留痕。
+    """
+    path = ROOT / ("_处理报告_预演.md" if STATS.get("dry_run") else "_处理报告.md")
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = ["# 处理报告", "", "- 时间：%s" % now,
+             "- 模式：%s" % ("**预演（没落地任何文件）**" if STATS.get("dry_run") else "正式执行"),
+             "- 从盯的文件夹吸入：%d 篇" % len(STATS["harvested"]),
              "- 新增归档：%d" % len(STATS["added"]),
              "- 跳过重复：%d" % len(STATS["skipped"]),
              "- 失败：%d" % len(STATS["failed"]),
              "- 暂缓成书：%d（篇数没攒够，等够了自动出书）" % len(STATS["held"]),
              "- 删除推广图：%d 张" % STATS["promo"], ""]
+    if STATS["pending_accounts"]:
+        lines += ["## 新号待确认（%d）" % len(STATS["pending_accounts"]),
+                  "这些文章识别出的公众号不在白名单里，已经搁到 `_待确认新号/`，**没有**混进任何一本书。",
+                  "要收就 `./epub.sh allow 号名`（会自动把搁置的文件放回收件箱），不要就不用管。", ""]
+        lines += ["- %s" % x for x in STATS["pending_accounts"]]
+        lines.append("")
+    if STATS["dup_fp"]:
+        lines += ["## 重复副本（%d，按内容识别，已跳过）" % len(STATS["dup_fp"]),
+                  "同一篇文章换了文件名又存了一遍。只按文件名判重会重复入书，所以这里按标题+发布时刻认。", ""]
+        lines += ["- %s" % x for x in STATS["dup_fp"]]
+        lines.append("")
+    if STATS["non_wechat"]:
+        lines += ["## 不是微信文章（%d，已跳过）" % len(STATS["non_wechat"]), ""]
+        lines += ["- %s" % x for x in STATS["non_wechat"]]
+        lines.append("")
+    if STATS["cleanable"]:
+        lines += ["## 盯的文件夹里，这些已经收过了（%d，可以安全删掉）" % len(STATS["cleanable"]),
+                  "原件都已经备份进 `<号>/原始HTML/` 了，删了也不影响重建。我不动你的文件，你自己清。", ""]
+        lines += ["- `%s`" % x for x in sorted(set(STATS["cleanable"]))]
+        lines.append("")
     if STATS["held"]:
         lines += ["## 暂缓成书（%d）" % len(STATS["held"]),
                   "源文件已经归档进 `xhtml/` 了，只是这个号还没成过书、篇数也没到门槛（%d 篇），所以没打包。" % MIN_PUBLISH,
@@ -1183,7 +1427,7 @@ def finish(built: list[str]) -> None:
 
 
 def main() -> int:
-    global MIN_PUBLISH
+    global MIN_PUBLISH, ALLOW_ALL_ACCOUNTS
     ap = argparse.ArgumentParser(description="把 Sigil XHTML 合成按月分章的 EPUB")
     ap.add_argument("--only", help="只重建指定公众号（目录名）")
     ap.add_argument("--add", nargs="+", help="归档新文件（.xhtml 或 .html）并重建对应 EPUB")
@@ -1195,10 +1439,40 @@ def main() -> int:
     ap.add_argument("--backfill-ads", action="store_true",
                     help="把已归档的 原始HTML/ 全扫一遍补记图片账（不转换、不改书）")
     ap.add_argument("--min-articles", type=int, default=MIN_PUBLISH,
-                    help="首次成书门槛（源 XHTML 篇数），默认 %d；0 = 不设门槛" % MIN_PUBLISH)
+                    help="成书门槛（源 XHTML 篇数），默认 %d；0 = 不设门槛" % MIN_PUBLISH)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="预演：只报告会收什么、跳过什么，不落地、不打包")
+    ap.add_argument("--allow", nargs="+", help="把新号加进白名单，并把搁置的文件放回收件箱")
+    ap.add_argument("--allow-all", action="store_true", help="本次放行所有号（不写白名单）")
     args = ap.parse_args()
 
     MIN_PUBLISH = max(0, args.min_articles)
+    ALLOW_ALL_ACCOUNTS = args.allow_all
+    STATS["dry_run"] = args.dry_run
+
+    if args.allow:
+        names = [n.strip() for n in args.allow if n.strip()]
+        allowed = _load_allowed() | set(names)
+        ALLOW_FILE.write_text(json.dumps({"allow": sorted(allowed)}, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+        moved = 0
+        for n in names:
+            hold = PENDING_DIR / safe_stem(n)
+            if not hold.is_dir():
+                continue
+            INBOX_DIR.mkdir(parents=True, exist_ok=True)
+            for f in sorted(hold.iterdir()):
+                if f.is_file() and not (INBOX_DIR / f.name).exists():
+                    shutil.move(str(f), str(INBOX_DIR / f.name))
+                    moved += 1
+            try:
+                hold.rmdir()
+            except OSError:
+                pass
+        log("已放行：%s → %s" % ("、".join(names), ALLOW_FILE.name))
+        if moved:
+            log("这些号之前搁置的 %d 个文件已放回收件箱，跑一次 inbox 就会收" % moved)
+        return 0
 
     if args.backfill_ads:
         n_files, n_cands = backfill_ads()
@@ -1207,7 +1481,7 @@ def main() -> int:
         return 0
 
     if args.inbox:
-        touched = process_inbox(Path(args.inbox).expanduser().resolve())
+        touched = process_inbox(Path(args.inbox).expanduser().resolve(), dry_run=args.dry_run)
         # 只有真的出了书的才算「重建」，被门槛挡下的进报告里的「暂缓成书」
         built = [a for a, d in touched.items() if not publish_blocked(d)]
         finish(built)

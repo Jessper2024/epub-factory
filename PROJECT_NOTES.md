@@ -4,9 +4,12 @@
 
 - **代码**：`~/Life/EPUB制作/_engine/`（本目录，带 git 和自建 venv）
 - **数据**：`~/Life/EPUB制作/<号名>/`（xhtml/ · 原始HTML/ · cover.jpg · epub）
-- **收件箱**：`~/Life/EPUB制作/_待处理/`
+- **收件箱**：`~/Life/EPUB制作/_待处理/`；**盯的下载文件夹**：`~/Downloads/微信公众号下载`（只这一个）
+- **新号待确认**：`~/Life/EPUB制作/_待确认新号/<号名>/`（`./epub.sh allow 号名` 才收）
 - **skill**：`~/.workbuddy/skills/epub-factory/`（用户级，任何会话自动可见）
-- **唯一入口**：`~/Life/EPUB制作/_engine/epub.sh`（`./epub.sh` / `only` / `inbox` / `add` / `list` / `check` / `toc`）
+- **唯一入口**：`~/Life/EPUB制作/_engine/epub.sh`
+  （`./epub.sh` / `only` / `inbox [--dry-run]` / `allow 号名` / `auto install` / `add` / `list` /
+  `check` / `toc` / `report` / `dash` / `ads` / `backfill` / `test` / `sync`）
 - **不要把长期资产放进 `~/WorkBuddy/<时间戳>/` 或 `~/Documents/Codex/<日期>/`**——会话级临时目录，会越堆越多、随时被清。
 - 依赖装在 `_engine/.venv`，不再依赖 WorkBuddy 的托管 venv。
 
@@ -43,8 +46,15 @@
   `xhtml/`（原始文档备份）+ `cover.jpg`（封面，自动生成、可换）+ `<号名>_YYYYMM[-YYYYMM].epub`（产物）。
   `--add` 新文件自动归到 `<号>/xhtml/`。
 - **收件箱流程**：`~/Life/EPUB制作/_待处理/` 丢待处理 HTML，`build_epub.py --inbox` 扫描 → 按号分流 →
-  转 XHTML 归档 + 原 HTML 备份到 `<号>/原始HTML/` → 只重建受影响的那几本 EPUB。新号自动建目录+封面。
+  转 XHTML 归档 + 原 HTML 备份到 `<号>/原始HTML/` → 只重建受影响的那几本 EPUB。
   陈少另一个源文件夹 `EPUB制作/微信公众号下载/` 已加 SKIP_DIRS（只当收件箱用，不当号目录）。
+- **只盯一个下载文件夹，每小时自动收**（陈少 2026-09-16 定）：范围只有
+  `WATCH_DIR = ~/Downloads/微信公众号下载`（`EXTRA_SOURCES=[WATCH_DIR]`，子目录往下 1 层）。
+  `./epub.sh auto install` 装 launchd 每小时跑一次（**要在本机终端装，沙箱装不上**）。
+  三条防呆：①按内容判重（`og:url` 里的 `sn` + 标题·发布时刻，双键任一命中），
+  ②指纹必须先算先登记再判"收过没有"，③名单外新号搁 `_待确认新号/`，`./epub.sh allow 号名` 才收。
+  `./epub.sh inbox --dry-run` 预演零落地，报告进 `_处理报告_预演.md`。
+  （`SIGI_DIR` 已改成 `_engine` 自己；`sigi_convert.py` 现有两份，以 `_engine/` 里的为准。）
 - **去推广图**：`PROMO_FILE_IDS` 黑名单（戴老板 8 个 fileid，全部视觉确认），转换前按 URL 删；
   防重复：XHTML 目标名由内容（日期+号+作者+标题）生成，同名自动跳过——源文件夹清空后再放重复文件也能识别。
 - **月份 = h1，文章标题 = h2（带日期前缀「2026年8月21日：死贵死贵的」），从旧到新**；

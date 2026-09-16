@@ -18,6 +18,7 @@
 │   ├─ dash_service.sh        看板启停/状态/登录自启
 │   ├─ report.py              报表页面生成（看板与 `_报表.html` 共用）
 │   ├─ build_epub.py          合订主脚本（识别博主 → 分册/分章 → 三级目录 → 打包 → 报告 → 台账）
+│   ├─ inbox_auto.sh          定时扫描（launchd 每小时；install/status/run）
 │   ├─ check_epub.py          交付前体检
 │   ├─ regress.py             回归比对（防改坏）
 │   ├─ dump_toc.py            打印三级目录树
@@ -27,17 +28,22 @@
 │   ├─ yuanchuan_crawler/     微信列表抓取（备选）
 │   ├─ backup.sh              打包源（xhtml + 原始HTML）
 │   ├─ baselines.json         回归基线
+│   ├─ allowed_accounts.json  新号白名单（本机状态，不进版本库）
 │   ├─ README.md / PROJECT_NOTES.md   用法与项目约定
 │   └─ .venv/                 自建虚拟环境（lxml + Pillow + requests）
 ├─ _处理报告.md                上次跑了什么（自动生成）
+├─ _处理报告_预演.md           上次 --dry-run 报告（不覆盖上面那份）
 ├─ _台账.md                    所有书的一览（自动生成）
-├─ _待处理/                    收件箱：要处理的 HTML 丢这里（也会自动吸入下面两个目录）
+├─ _报表.html                  看板用的静态报表
+├─ _已归档指纹.json            判重指纹表（自动生成，删了会重建）
+├─ _待处理/                    收件箱：要处理的 HTML 丢这里
+├─ _待确认新号/<号名>/         名单外的新号先搁这儿，点名（allow）后才收
 ├─ <公众号名>/
 │   ├─ xhtml/                 该号全部 -Sigil.xhtml（不可删，EPUB 由它重建）
 │   ├─ 原始HTML/              转换前的原 HTML 备份
 │   ├─ cover.jpg              封面（可换，脚本不覆盖已有）
 │   └─ <号名>_YYYYMM-YYYYMM.epub
-└─ 微信公众号下载/            浏览器存 HTML 的源目录（自动吸入，不当号目录）
+└─ 微信公众号下载/            旧位置，已不用（现在只盯 ~/Downloads/微信公众号下载）
 ```
 
 配套 skill：`~/.workbuddy/skills/epub-factory/`（用户级，任何会话自动可见）。
@@ -49,7 +55,10 @@ cd ~/Life/EPUB制作/_engine
 
 ./epub.sh                 # 全部公众号重建
 ./epub.sh only 猫刀笔      # 只重建某一本
-./epub.sh inbox           # 扫描 _待处理/，按博主分流并重建受影响的书
+./epub.sh inbox           # 扫描 _待处理/（并先吸入盯的下载文件夹），按博主分流并重建
+./epub.sh inbox --dry-run # 预演：只说会收什么、跳过什么，一份文件都不落地
+./epub.sh allow 晚点LatePost  # 放行一个新号（把 _待确认新号/ 里搁置的文件放回收件箱）
+./epub.sh auto install    # 装定时任务：每小时自动扫一次盯的文件夹
 ./epub.sh add a.html      # 归档指定文件并重建（原文件保留）
 ./epub.sh list            # 只看扫描结果
 ./epub.sh check           # 交付前体检：源 xhtml + EPUB 双向校验
@@ -103,14 +112,39 @@ cd ~/Life/EPUB制作/_engine
 - `baselines.json` + `./epub.sh test`：回归基线。改了规则先跑它，篇数/目录条目/体积对不上会直接报出来，
   确认是刻意改动就 `test --save` 重存。**长期项目最怕改坏不知道，这是保险丝。**
 
-## 收件箱会自动吸入
+## 只盯一个下载文件夹（每小时自动收）
 
-`./epub.sh inbox` 会先去这些目录把新 HTML 吸进 `_待处理/` 再处理（原文件保留，已备份过的自动跳过）：
+**只盯这一个文件夹**，别的地方一律不碰（陈少 2026-09-16 定）：
 
 - `~/Downloads/微信公众号下载`（OpenClaw / SingleFile 的输出）
-- `~/Life/EPUB制作/微信公众号下载`
 
-想加新来源：改 `build_epub.py` 里的 `EXTRA_SOURCES`。
+`./epub.sh inbox` 会先把这里的新 HTML 吸进 `_待处理/` 再处理；**原文件不动**（复制，不是搬走）。
+子目录也认（默认往下 1 层）。想加来源：改 `build_epub.py` 的 `EXTRA_SOURCES`。
+
+### 装成每小时自动跑（一次就够）
+
+```bash
+cd ~/Life/EPUB制作/_engine
+./epub.sh auto install     # 装：每小时扫一次
+./epub.sh auto status      # 看状态 + 上次跑了什么
+./epub.sh auto run         # 立刻手动跑一次
+./epub.sh auto uninstall   # 取消
+```
+
+装好后**不依赖 WorkBuddy 是否开着**，纯脚本、零消耗；日志在 `~/Library/Logs/epub-inbox.log`。
+> 受限环境（沙箱 / 非本人终端）里 `launchctl` 会被拒，**要在自己的终端里跑 install**。
+> 想改频率：`INBOX_INTERVAL=7200 ./epub.sh auto install`（秒）。
+
+### 三条防呆（都是踩出来的）
+
+- **重复副本按内容认，不按文件名**。同一篇换个名字再存一遍（`01_闯祸了.html` 这种）靠
+  「文章 ID（`og:url` 里的 `sn`）+ 标题·发布时刻」双指纹识别，命中任一即跳过。
+  只按文件名判重会让猫刀笔从 19 篇涨到 32 篇。
+- **新号要走一次点名**。识别出的号不在白名单里时，文件先搁到 `_待确认新号/<号名>/`，
+  **不建书、也绝不混进别人的书**；要收就 `./epub.sh allow <号名>`（会自动把搁置的文件放回收件箱），
+  不要就不管。看板「待确认新号」卡会一直提醒。
+- **先预演再动手**。`./epub.sh inbox --dry-run` 只报告会收什么、跳过什么，**一份文件都不落地**，
+  报告另存 `_处理报告_预演.md`（不覆盖上次正式执行的留痕）。
 
 ## 坏了怎么办
 

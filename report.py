@@ -172,6 +172,16 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
                for a in accounts if not a["epubs"]]
     waiting = [(n, w) for n, w in waiting if w]
 
+    # 名单外的新号：吸进来了但没点名，文件搁在 _待确认新号/，不建书、不混进别人的书
+    pend = []
+    pend_dir = ROOT / "_待确认新号"
+    if pend_dir.is_dir():
+        for d in sorted(pend_dir.iterdir()):
+            if d.is_dir():
+                n = sum(1 for f in d.iterdir() if f.is_file())
+                if n:
+                    pend.append((d.name, n))
+
     # 回归
     base_file = R.BASE_FILE
     regress_state, regress_detail = "未建立基线", "先跑 ./epub.sh test --save"
@@ -368,6 +378,11 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <h4><span class="dot {'warn' if waiting else 'ok'}"></span>成书门槛（{B.MIN_PUBLISH} 篇）</h4>
       <div>{len(waiting)} 个号还没成书，在等攒篇数</div>
       <div class="muted">{('；'.join('%s（%s）' % (n, w) for n, w in waiting) + '　说一声就能提前出书') if waiting else '已有成品的号不受门槛约束，照常跟着新增更新'}</div>
+    </div>
+    <div class="card">
+      <h4><span class="dot {'warn' if pend else 'ok'}"></span>待确认新号</h4>
+      <div>{len(pend)} 个号在等点名（共 {sum(n for _, n in pend)} 篇）</div>
+      <div class="muted">{('；'.join('%s %d 篇' % (n, c) for n, c in pend) + '　—— 要收就 <code>./epub.sh allow 号名</code>，不要就不管，绝不会混进别的书') if pend else '盯的文件夹里没有未确认的新号'}</div>
     </div>
   </div>
 
