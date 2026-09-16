@@ -214,6 +214,33 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
         bage = "今天" if days == 0 else f"{days} 天前"
     bverified = sum(1 for p in bpkgs if (Path(str(p) + ".sha256")).exists())
     bold = sorted((bdir / "旧版epub").glob("*")) if (bdir / "旧版epub").is_dir() else []
+
+    # 核心资产：xhtml 源（最值钱、不可再生）——从最新备份的清单里读篇数，
+    # 再加一眼源镜像（原文件副本，拔盘插别的机器可直接打开单篇）
+    bmani = {}
+    if bpkgs:
+        mf = Path(str(bpkgs[0]) + ".manifest.json")
+        if mf.is_file():
+            try:
+                bmani = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                bmani = {}
+    bxhtml = (bmani.get("source") or {}).get("xhtml")
+    braw = (bmani.get("source") or {}).get("raw")
+    bcore_ok = bool(bmani.get("verified"))
+    bmirror = bdir / "源镜像"
+    bm_accounts = bm_xhtml = 0
+    bm_mb = 0.0
+    if bmirror.is_dir():
+        for d in bmirror.iterdir():
+            if not d.is_dir():
+                continue
+            xs = list((d / "xhtml").glob("*.xhtml"))
+            if xs:
+                bm_accounts += 1
+                bm_xhtml += len(xs)
+                bm_mb += sum(f.stat().st_size for f in xs) / 1024 / 1024
+
     brows = "".join(
         f'<div class="promo"><span class="mono">{html.escape(p.name)}</span>'
         f'<span class="pill grey">{p.stat().st_size / 1024 / 1024:.0f}MB</span>'
@@ -446,7 +473,12 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <span class="pill{' grey' if bverified < len(bpkgs) else ''}">{bverified}/{len(bpkgs)} 有校验清单</span>
       <span class="pill grey">旧版 epub {len(bold)} 份</span>
     </div>
-    <div class="muted" style="margin:6px 0">{html.escape(str(bdir))}</div>
+    <div class="row" style="margin-top:8px">
+      <span class="pill{' ' if bcore_ok else ' warn'}">xhtml 源 {bxhtml if bxhtml is not None else '—'} 篇{'（包内已核对）' if bcore_ok else '（未核对/无清单）'}</span>
+      <span class="pill grey">原始HTML {braw if braw is not None else '—'} 个</span>
+      <span class="pill{' ' if bm_xhtml else ' warn'}">源镜像 {bm_accounts} 个号 · {bm_xhtml} 篇 · {bm_mb:.0f}MB</span>
+    </div>
+    <div class="muted" style="margin:6px 0">{html.escape(str(bdir))}　·　源镜像 = 原文件副本，拔盘插别的机器可直接打开单篇，不用解包</div>
     {brows if brows else '<p class="muted">还没有备份 · 跑 <code>./epub.sh backup</code></p>'}
   </div>
 

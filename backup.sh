@@ -5,6 +5,12 @@
 # 只打不可再生的源：各号 xhtml/ 与 原始HTML/、封面、代码。
 # 成品 epub 能从源重建，不进包（省一半体积）。
 #
+# 核心资产 = 各号 xhtml/（单篇文稿本体，最值钱、丢了不可再生）。
+# 陈少 2026-09-17 明确要求：xhtml 源必须有**看得见、拿得到**的备份，
+# 不能只是"打进 tar 里说包含"。所以每份备份做两件事：
+#   ① tar 包里含 xhtml，并写 .manifest.json 记录篇数，打包前后强校验（数量对不上直接报错）
+#   ② 额外以原文件形式镜像到 <备份目录>/源镜像/<号>/xhtml/，拔盘插别的机器可直接打开单篇，不用解包
+#
 # 用法
 #   ./backup.sh                 打一份到本地默认目录（~/Life/EPUB备份）
 #   ./backup.sh <目标目录>       打到指定目录（移动硬盘直接指过去）
@@ -12,6 +18,11 @@
 #   ./backup.sh verify <包>      校验某一个包（SHA256 + tar 可读性 + 文件数）
 #   ./backup.sh verify-all      校验本地所有包
 #   ./backup.sh clean           按保留策略清理旧包（默认留 5 份）
+#
+# 每份备份旁会有两个附属文件：
+#   <包>.sha256          校验清单（防"备份了但是坏的"）
+#   <包>.manifest.json   核心资产清单：xhtml 篇数 / 原始HTML 数 / 各号明细 / 代码版本
+# 另外 <备份目录>/源镜像/<号>/xhtml/ 是核心资产的原文件副本，可直接打开单篇。
 #
 # 异地目标写在 config.local.json 的 backup_targets（数组），打了本地会自动复制过去：
 #   .venv/bin/python -c "from core import config; config.save_local(backup_targets=['/Volumes/移动硬盘/EPUB备份'])"
@@ -60,8 +71,71 @@ print(json.dumps(v, ensure_ascii=False) if isinstance(v,(list,dict)) else v)
 DEFAULT_DEST="$(cfg backup_dir "'$HOME/Life/EPUB备份'")"
 PREFIX="$(cfg backup_prefix 'EPUB源_')"
 
+# ── 核心资产统计 ──────────────────────────────────────────────
+# 只数真文件，跳过 macOS 的 ._* AppleDouble（tar 默认会存这些元数据副本，
+# 不跳过会让计数翻倍，误以为"篇数对不上"）。
+src_stats() {
+  "$PY" - "$ROOT" <<'PYEOF'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+xhtml, raw, per = 0, 0, {}
+for d in sorted(root.iterdir()):
+    if not d.is_dir() or d.name.startswith(("_", ".")):
+        continue
+    xs = sorted((d / "xhtml").glob("*.xhtml")) if (d / "xhtml").is_dir() else []
+    rd = d / "原始HTML"
+    rs = [p for p in rd.rglob("*") if p.is_file() and not p.name.startswith("._")] if rd.is_dir() else []
+    if xs:
+        per[d.name] = {"xhtml": len(xs), "raw": len(rs)}
+    xhtml += len(xs)
+    raw += len(rs)
+print(json.dumps({"xhtml": xhtml, "raw": raw, "per": per}, ensure_ascii=False))
+PYEOF
+}
+
+pkg_stats() {
+  "$PY" - "$1" <<'PYEOF'
+import json, tarfile, sys
+t = tarfile.open(sys.argv[1], "r:gz")
+xhtml = raw = 0
+for m in t.getmembers():
+    if not m.isfile() or m.name.rsplit("/", 1)[-1].startswith("._"):
+        continue
+    parts = m.name.split("/")
+    if len(parts) >= 3 and parts[-2] == "xhtml" and m.name.endswith(".xhtml"):
+        xhtml += 1
+    elif "原始HTML" in m.name:
+        raw += 1
+print(json.dumps({"xhtml": xhtml, "raw": raw}))
+PYEOF
+}
+
+# 以原文件形式镜像核心资产（xhtml + 原始HTML）到备份目录。
+# 增量覆盖、**不做 --delete**：备份的语义是累积，源目录万一误删，镜像里还得留着。
+mirror_sources() {
+  local dest="$1" mirror="$dest/源镜像"
+  mkdir -p "$mirror" || { echo "  ! 源镜像目录建不了：$mirror"; return 1; }
+  local d name n=0
+  for d in "$ROOT"/*/; do
+    [ -d "$d/xhtml" ] || continue
+    name="$(basename "$d")"
+    mkdir -p "$mirror/$name"
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a "$d/xhtml/" "$mirror/$name/xhtml/"
+      [ -d "$d/原始HTML" ] && rsync -a "$d/原始HTML/" "$mirror/$name/原始HTML/"
+    else
+      cp -R "$d/xhtml" "$mirror/$name/" 2>/dev/null
+      [ -d "$d/原始HTML" ] && cp -R "$d/原始HTML" "$mirror/$name/" 2>/dev/null
+    fi
+    n=$((n + 1))
+  done
+  echo "  → 源镜像（原文件，可直接打开）：$mirror（$n 个号）"
+}
+
 cmd_backup() {
   local dest="${1:-$DEFAULT_DEST}"
+  local gitrev
+  gitrev="$(git -C "$ENGINE" rev-parse --short HEAD 2>/dev/null || echo '?')"
 
   # 外接盘没插时 mkdir 会失败——必须明确报错，绝不能静默"备份成功"
   # （静默失败是备份系统最坏的故障：你以为有备份，其实一份都没有）
@@ -80,8 +154,17 @@ cmd_backup() {
   local name="${PREFIX}$(date +%Y%m%d-%H%M).tar.gz"
   local path="$dest/$name"
 
-  echo "打包中…（只含不可再生的源，epub 不进包）"
-  tar -czf "$path" \
+  # 打包前先数一遍核心资产，打完再数一遍包里的——两遍对不上就说明漏了
+  local before
+  before="$(src_stats)"
+  echo "核心资产：$("$PY" -c "
+import json,sys
+d=json.loads(sys.argv[1])
+print('xhtml %d 篇 · 原始HTML %d 个' % (d['xhtml'], d['raw']))" "$before")"
+
+  echo "打包中…（含 xhtml 源与原始HTML，成品 epub 不进包）"
+  # COPYFILE_DISABLE=1：不让 macOS 往 tar 里塞 ._* 元数据副本（条目翻倍、计数失真）
+  COPYFILE_DISABLE=1 tar -czf "$path" \
     -C "$ROOT" \
     --exclude='_engine/.venv' \
     --exclude='_engine/.git' \
@@ -98,6 +181,35 @@ cmd_backup() {
   echo "备份完成：$path"
   echo "  大小 $(du -h "$path" | cut -f1)　SHA256 ${sum:0:16}…"
 
+  # 包内复核：核心资产到底进没进包，用数字说话，不靠"应该包含了"
+  local after verdict
+  after="$(pkg_stats "$path")"
+  verdict="$("$PY" - "$path" "$before" "$after" "$gitrev" <<'PYEOF'
+import datetime, json, pathlib, sys
+path, before, after, git = sys.argv[1], json.loads(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4]
+ok = after["xhtml"] == before["xhtml"] and before["xhtml"] > 0
+manifest = {
+    "pkg": pathlib.Path(path).name,
+    "created": datetime.datetime.now().isoformat(timespec="seconds"),
+    "git": git,
+    "source": before,
+    "in_pkg": after,
+    "mirror": "源镜像",
+    "verified": ok,
+}
+pathlib.Path(path + ".manifest.json").write_text(
+    json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+if ok:
+    print("OK  包内含 xhtml %d 篇 / 原始HTML %d 个（与源一致）" % (after["xhtml"], after["raw"]))
+else:
+    print("BAD 包内 xhtml %d 篇 ≠ 源 %d 篇" % (after["xhtml"], before["xhtml"]))
+PYEOF
+)"
+  case "$verdict" in
+    OK*)  echo "  ✓ ${verdict#OK  }" ;;
+    BAD*) echo "  ✗ ${verdict#BAD }——这份备份不完整，先别用它恢复（包已保留，便于排查）" ;;
+  esac
+
   # 旧版 epub 备份目录（拆书前的旧成品）。主包里排除了 *.epub（成品能从源重建），
   # 但这一份是历史遗留、没有对应的源，所以单独以原文件形式存一份，方便直接取用。
   local old
@@ -110,6 +222,9 @@ cmd_backup() {
       echo "  ! 旧版 epub 复制失败：$old"
     fi
   done
+
+  # 源镜像：核心资产以原文件形式再存一份，拔盘插别的机器能直接打开单篇，不用解 tar
+  mirror_sources "$dest" || echo "  ! 源镜像未完成（tar 包仍然可用）"
 
   # 异地副本（3-2-1 的另外 2 份）
   local targets
@@ -155,7 +270,15 @@ print(int((time.time()-os.path.getmtime('$f'))//86400))
     else
       ok="无清单"
     fi
-    printf '  %s  %-34s %6s  %s 天前\n' "$ok" "$(basename "$f")" "$size" "$age"
+    # 核心资产篇数（清单里读得到就显示，旧包显示 -）
+    local xh="-"
+    if [ -f "$f.manifest.json" ]; then
+      xh="$("$PY" -c "
+import json,sys
+print(json.load(open(sys.argv[1],encoding='utf-8')).get('source',{}).get('xhtml',0))" \
+        "$f.manifest.json" 2>/dev/null || echo '?')"
+    fi
+    printf '  %s  %-34s %6s  %s 天前  xhtml %s 篇\n' "$ok" "$(basename "$f")" "$size" "$age" "$xh"
   done
   [ "$n" -eq 0 ] && echo "  （还没有备份）"
 }
@@ -180,13 +303,36 @@ cmd_verify() {
   else
     echo "✗ 无法读取归档"; ok=0
   fi
-  # 关键内容抽查：必须有至少一个号的 xhtml
-  local has
-  has="$(tar -tzf "$pkg" 2>/dev/null | grep -c '/xhtml/' || true)"
-  if [ "${has:-0}" -gt 0 ]; then
-    echo "✓ 含 xhtml 源（$has 个路径）"
+  # 核心资产核对：有清单就按清单核篇数；没清单的旧包退回粗检
+  local mf="$pkg.manifest.json"
+  if [ -f "$mf" ]; then
+    local cur
+    cur="$(pkg_stats "$pkg" 2>/dev/null || echo '{}')"
+    if ! "$PY" - "$mf" "$cur" <<'PYEOF'
+import json, sys
+mf = json.loads(open(sys.argv[1], encoding="utf-8").read())
+try:
+    cur = json.loads(sys.argv[2])
+except Exception:
+    cur = {}
+exp = mf.get("source", {}).get("xhtml", 0)
+got = cur.get("xhtml", 0)
+if got == exp and exp > 0:
+    print("✓ xhtml 源 %d 篇 · 原始HTML %d 个（与清单一致，清单存于 %s）"
+          % (got, cur.get("raw", 0), mf.get("created", "?")))
+else:
+    print("✗ xhtml 源 %d 篇 ≠ 清单 %d 篇——这份备份不完整，别用它恢复" % (got, exp))
+    sys.exit(1)
+PYEOF
+    then ok=0; fi
   else
-    echo "✗ 包里没有 xhtml 源——这份备份是废的"; ok=0
+    local has
+    has="$(tar -tzf "$pkg" 2>/dev/null | grep -c '/xhtml/' || true)"
+    if [ "${has:-0}" -gt 0 ]; then
+      echo "✓ 含 xhtml 源（$has 个路径）— 旧包无清单，未核篇数"
+    else
+      echo "✗ 包里没有 xhtml 源——这份备份是废的"; ok=0
+    fi
   fi
   [ "$ok" -eq 1 ] && echo "结论：这份备份可用" || echo "结论：不可用"
   return $((1 - ok))
