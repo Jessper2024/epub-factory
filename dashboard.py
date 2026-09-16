@@ -25,8 +25,8 @@ import build_epub as B  # noqa: E402
 import report as RP  # noqa: E402
 
 DEFAULT_PORT = 8760
-CACHE_TTL = 30          # 秒；同一份扫描结果复用这么久
-PAGE_REFRESH = 60       # 秒；页面自动重新加载的间隔
+CACHE_TTL = 300         # 秒；同一份扫描结果复用这么久（不实时重扫，省资源）
+PAGE_REFRESH = 0        # 秒；0 = 页面不自动刷新，点「立即刷新」或按 F5 才重扫
 # 这些文件改了就让看板自己热重载，不用重启（长期项目会一直改规则）
 WATCHED = ("promo.py", "build_epub.py", "report.py")
 
@@ -98,10 +98,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    global PAGE_REFRESH
     ap = argparse.ArgumentParser(description="成书看板本地服务")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+    ap.add_argument("--refresh", type=int, default=PAGE_REFRESH,
+                    help="页面自动刷新秒数；0（默认）=不自动刷新，按需手动刷")
     args = ap.parse_args()
+    PAGE_REFRESH = max(0, args.refresh)
 
     port = args.port
     for _ in range(10):          # 端口被占就往后找
@@ -116,7 +120,10 @@ def main() -> int:
 
     url = "http://127.0.0.1:%d/" % port
     print("成书看板已启动：%s" % url)
-    print("数据只在本机，页面每 %d 秒自动刷新。Ctrl+C 停止。" % PAGE_REFRESH)
+    if PAGE_REFRESH:
+        print("数据只在本机，页面每 %d 秒自动刷新。Ctrl+C 停止。" % PAGE_REFRESH)
+    else:
+        print("数据只在本机，按需刷新（点页面上的「立即刷新」）。Ctrl+C 停止。")
     if not args.no_open:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

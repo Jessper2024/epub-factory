@@ -269,7 +269,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-{('<meta http-equiv="refresh" content="%d"/>' % refresh_sec) if live else ''}
+{('<meta http-equiv="refresh" content="%d"/>' % refresh_sec) if (live and refresh_sec > 0) else ''}
 <title>成书看板 · {now}</title>
 <style>
   :root {{
@@ -326,8 +326,8 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
 <header>
   <h1>成书{('看板' if live else '报表')}</h1>
   <div class="meta">
-    {('实时扫描 · 每 %d 秒自动刷新 · 本页生成于 %s' % (refresh_sec, now)) if live else ('生成于 %s　·　刷新：<code>cd ~/Life/EPUB制作/_engine &amp;&amp; ./epub.sh report</code>' % now)}
-    　·　数据来自磁盘实际扫描
+    {('每 %d 秒自动刷新 · 本页生成于 %s' % (refresh_sec, now)) if (live and refresh_sec > 0) else (('按需刷新 · 本页生成于 %s' % now) if live else ('生成于 %s　·　刷新：<code>cd ~/Life/EPUB制作/_engine &amp;&amp; ./epub.sh report</code>' % now))}
+    　·　数据来自磁盘实际扫描，不自动重扫
     {('　·　<a class="refresh" href="/refresh">立即刷新</a>') if live else ''}
   </div>
 </header>
