@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_epub as B  # noqa: E402
 import promo as P  # noqa: E402
 import regress as R  # noqa: E402
+from core import config as C  # noqa: E402
 from core import health as H  # noqa: E402   # 系统自检（依赖/磁盘/备份/结构…）
 
 ROOT = B.ROOT
@@ -196,6 +197,30 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
         f'<span class="lb">{html.escape(c["label"])}</span>'
         f'<span class="muted">{html.escape(c["detail"])}</span></div>'
         for c in h.get("checks", []))
+
+    # 备份概览（陈少 2026-09-17 要求写进仪表盘：一眼看到备份在哪、有几份、多久没打）
+    bdir = Path(C.get("backup_dir")).expanduser()
+    bprefix = C.get("backup_prefix") or ""
+    b_ok = bdir.is_dir()
+    bpkgs: list = []
+    if b_ok:
+        bpkgs = sorted(bdir.glob(f"{bprefix}*.tar.gz"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    btotal_mb = sum(p.stat().st_size for p in bpkgs) / 1024 / 1024
+    bage = ""
+    if bpkgs:
+        days = int((dt.datetime.now()
+                    - dt.datetime.fromtimestamp(bpkgs[0].stat().st_mtime)).days)
+        bage = "今天" if days == 0 else f"{days} 天前"
+    bverified = sum(1 for p in bpkgs if (Path(str(p) + ".sha256")).exists())
+    bold = sorted((bdir / "旧版epub").glob("*")) if (bdir / "旧版epub").is_dir() else []
+    brows = "".join(
+        f'<div class="promo"><span class="mono">{html.escape(p.name)}</span>'
+        f'<span class="pill grey">{p.stat().st_size / 1024 / 1024:.0f}MB</span>'
+        f'<span class="pill grey">{html.escape(dt.datetime.fromtimestamp(p.stat().st_mtime).strftime("%m-%d %H:%M"))}</span>'
+        f'<span class="pill{" " if (Path(str(p) + ".sha256")).exists() else " warn"}">'
+        f'{"有校验清单" if (Path(str(p) + ".sha256")).exists() else "缺清单"}</span></div>'
+        for p in bpkgs[:6])
 
     # 回归
     base_file = R.BASE_FILE
@@ -409,6 +434,20 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <div>{h['score']} 分 · {html.escape(h['level_text'])}　<span class="muted">{html.escape(h.get('checked_at', ''))}</span></div>
       <div style="margin-top:6px">{checks_html or '<span class="muted">自检不可用</span>'}</div>
     </div>
+  </div>
+
+  <h2>备份 · {html.escape(bdir.name) if b_ok else '目标不可用'}</h2>
+  <div class="card">
+    {('<div class="pill warn">备份目标不可用（外接盘没插？）：' + html.escape(str(bdir)) + '</div>') if not b_ok else ''}
+    <div class="row">
+      <span class="pill">{len(bpkgs)} 份</span>
+      <span class="pill grey">共 {btotal_mb:.0f} MB</span>
+      <span class="pill">{('最新 ' + bage) if bage else '尚无备份'}</span>
+      <span class="pill{' grey' if bverified < len(bpkgs) else ''}">{bverified}/{len(bpkgs)} 有校验清单</span>
+      <span class="pill grey">旧版 epub {len(bold)} 份</span>
+    </div>
+    <div class="muted" style="margin:6px 0">{html.escape(str(bdir))}</div>
+    {brows if brows else '<p class="muted">还没有备份 · 跑 <code>./epub.sh backup</code></p>'}
   </div>
 
   <h2>每月成文量</h2>

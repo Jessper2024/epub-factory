@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +17,16 @@ import build_epub as B  # noqa: E402
 
 BASE_FILE = Path(__file__).resolve().parent / "baselines.json"
 SIZE_TOLERANCE = 0.25          # 体积允许 ±25%（图片重压、封面变化会有浮动）
+
+
+def _git_rev() -> str:
+    """当前代码版本，写进基线留痕，方便回溯"这版基线是在哪个代码状态下存的"。"""
+    try:
+        return subprocess.run(["git", "-C", str(Path(__file__).resolve().parent),
+                               "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return "?"
 
 
 def snapshot() -> dict:
@@ -36,6 +48,8 @@ def snapshot() -> dict:
 def compare(base: dict, cur: dict) -> list[str]:
     problems = []
     for name in sorted(set(base) | set(cur)):
+        if name.startswith("_"):        # _meta 是留痕信息，不是书
+            continue
         if name not in cur:
             problems.append("%s 不见了" % name)
             continue
@@ -59,8 +73,20 @@ def main() -> int:
     save = "--save" in sys.argv
     cur = snapshot()
     if save:
-        BASE_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n",
+        payload = {
+            "_meta": {"updated_at": dt.datetime.now().isoformat(timespec="seconds"),
+                      "git": _git_rev(), "books": len(cur)},
+            **cur,
+        }
+        BASE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                              encoding="utf-8")
+        try:
+            from core import audit
+            audit.log("baseline.save", books=len(cur),
+                      articles=sum(v.get("articles", 0) for v in cur.values()),
+                      git=_git_rev())
+        except Exception:
+            pass
         print("基线已更新 →", BASE_FILE)
         for name, st in cur.items():
             print("  %-46s %s" % (name, st))
@@ -69,6 +95,9 @@ def main() -> int:
         print("还没有基线，先跑：./epub.sh test --save")
         return 1
     base = json.loads(BASE_FILE.read_text(encoding="utf-8"))
+    meta = base.get("_meta") or {}
+    if meta.get("updated_at"):
+        print("基线存于 %s（代码 %s）" % (meta["updated_at"], meta.get("git", "?")))
     problems = compare(base, cur)
     if problems:
         print("✗ 与基线不一致（%d 处）" % len(problems))

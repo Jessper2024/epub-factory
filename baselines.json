@@ -1,11 +1,16 @@
 {
-  "晚点LatePost_202509-202608.epub": {
-    "size_mb": 14.3,
-    "months": 9,
-    "articles": 23,
-    "toc": 72,
-    "parts": 9,
-    "source_xhtml": 23
+  "_meta": {
+    "updated_at": "2026-09-17T04:39:54",
+    "git": "93f4df8",
+    "books": 5
+  },
+  "晚点LatePost_201909-202608.epub": {
+    "size_mb": 14.8,
+    "months": 11,
+    "articles": 25,
+    "toc": 83,
+    "parts": 11,
+    "source_xhtml": 25
   },
   "猫刀笔_202608-202609.epub": {
     "size_mb": 4.8,

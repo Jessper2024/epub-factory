@@ -54,12 +54,29 @@ print(json.dumps(v, ensure_ascii=False) if isinstance(v,(list,dict)) else v)
 " 2>/dev/null || echo "$2"; }
 
 # 与 core/health 共用同一份定义，避免"打了备份却查不到"
-DEFAULT_DEST="$(cfg backup_dir "$HOME/Life/EPUB备份")"
+# 注意 cfg 的第二个参数会直接嵌进 python 代码，必须是**带引号的字面量**：
+# 传 "$HOME/..." 展开成 /Users/... 会让 python 报语法错、cfg 静默 fallback 到默认值
+# （踩过：明明改了 backup_dir 指向外接盘，备份却还打在本地）。
+DEFAULT_DEST="$(cfg backup_dir "'$HOME/Life/EPUB备份'")"
 PREFIX="$(cfg backup_prefix 'EPUB源_')"
 
 cmd_backup() {
   local dest="${1:-$DEFAULT_DEST}"
-  mkdir -p "$dest"
+
+  # 外接盘没插时 mkdir 会失败——必须明确报错，绝不能静默"备份成功"
+  # （静默失败是备份系统最坏的故障：你以为有备份，其实一份都没有）
+  if ! mkdir -p "$dest" 2>/dev/null; then
+    echo "✗ 备份目标不可用：$dest"
+    echo "  外接盘没插、或路径不存在。插上后重跑；此期间系统处于「无异地副本」状态，"
+    echo "  ./epub.sh health 会持续提醒。"
+    return 1
+  fi
+  if ! touch "$dest/.write-probe" 2>/dev/null; then
+    echo "✗ 备份目标不可写：$dest（磁盘写保护或已满？）"
+    return 1
+  fi
+  rm -f "$dest/.write-probe"
+
   local name="${PREFIX}$(date +%Y%m%d-%H%M).tar.gz"
   local path="$dest/$name"
 
@@ -80,6 +97,19 @@ cmd_backup() {
 
   echo "备份完成：$path"
   echo "  大小 $(du -h "$path" | cut -f1)　SHA256 ${sum:0:16}…"
+
+  # 旧版 epub 备份目录（拆书前的旧成品）。主包里排除了 *.epub（成品能从源重建），
+  # 但这一份是历史遗留、没有对应的源，所以单独以原文件形式存一份，方便直接取用。
+  local old
+  for old in "$ROOT"/_旧版备份_*; do
+    [ -d "$old" ] || continue
+    mkdir -p "$dest/旧版epub"
+    if cp -R "$old" "$dest/旧版epub/" 2>/dev/null; then
+      echo "  → 旧版 epub 副本：$dest/旧版epub/$(basename "$old")"
+    else
+      echo "  ! 旧版 epub 复制失败：$old"
+    fi
+  done
 
   # 异地副本（3-2-1 的另外 2 份）
   local targets

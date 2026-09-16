@@ -117,9 +117,17 @@ def _find_latest_backup() -> Path | None:
 
 
 def _check_backup() -> tuple[str, bool, str]:
+    # 备份目标本身就是外接盘时，盘没插 = 既不能备份也不能恢复。
+    # 这种情况必须 fail（红），不能只是"warning"——否则会长期被当成小问题忽略掉。
+    d = Path(config.get("backup_dir")).expanduser()
+    if not d.is_dir():
+        return "fail", False, (
+            f"备份目标不可用：{d}（外接盘没插？）——当前既打不了备份，也恢复不了。"
+            f"插上后跑 ./epub.sh backup"
+        )
     p = _find_latest_backup()
     if p is None:
-        return "warn", True, "没有任何备份（不可再生资产目前只有一份）"
+        return "warn", True, f"备份目标已就绪（{d.name}），但还没有任何备份"
     age = (dt.datetime.now() - dt.datetime.fromtimestamp(p.stat().st_mtime)).days
     if age > BACKUP_WARN_DAYS:
         return "warn", True, f"最新备份 {age} 天前（{p.name}）"
