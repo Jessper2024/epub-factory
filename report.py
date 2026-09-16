@@ -249,6 +249,36 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
         f'{"有校验清单" if (Path(str(p) + ".sha256")).exists() else "缺清单"}</span></div>'
         for p in bpkgs[:6])
 
+    # 源料台账：还没进书的那些（陈少 2026-09-17 要全量对照：哪篇进了哪本书、哪些还没收）
+    src_dir = Path(C.get("watch_dir")).expanduser()
+    led_stat: dict = {}
+    led_rows = ""
+    try:
+        import ledger
+        led = ledger.collect()
+        led_stat = led["stats"]
+        for r in led["pending"]:
+            if r.get("dupe_of"):
+                cls, state = "warn", "疑似重复"
+                note = "与已进书《%s》标题相同" % r["dupe_of"]
+            elif r["risk"] == "biz 可归号":
+                cls, state = "", "可归号"
+                note = "biz 判定属 %s，可安全收" % r["biz_owner"]
+            elif r["risk"] == "新号未放行":
+                cls, state = "grey", "新号"
+                note = "需 ./epub.sh allow %s" % (r["account"] if r["account"] != "未识别" else "号名")
+            else:
+                cls, state, note = "", "待收", ""
+            led_rows += (
+                '<tr><td><span class="pill %s">%s</span></td>'
+                '<td>%s</td><td>%s</td><td class="mono">%s</td>'
+                '<td class="num">%.1fMB</td><td class="muted">%s</td></tr>'
+                % (cls, state, html.escape(r["account"]), html.escape(r["title"][:60]),
+                   html.escape(r["file"][:48]), r.get("size_mb", 0), html.escape(note)))
+    except Exception as exc:                     # 台账挂了不能让整张报表出不来
+        led_rows = ('<tr><td colspan="6" class="muted">台账不可用：%s</td></tr>'
+                    % html.escape(str(exc)[:120]))
+
     # 回归
     base_file = R.BASE_FILE
     regress_state, regress_detail = "未建立基线", "先跑 ./epub.sh test --save"
@@ -495,6 +525,26 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
       <th class="num">图</th><th class="num">小标题</th></tr></thead>
     <tbody id="tb">{tr}</tbody>
   </table>
+
+  <h2>源料台账 · 未收 {led_stat.get('pending', 0)} 篇（{led_stat.get('pending_mb', 0):.0f}MB）</h2>
+  <div class="card">
+    <div class="row">
+      <span class="pill">已进书 {led_stat.get('archived', 0)} 篇</span>
+      <span class="pill warn">未收 {led_stat.get('pending', 0)} 篇</span>
+      <span class="pill warn">疑似重复 {led_stat.get('dupe', 0)}</span>
+      <span class="pill">biz 可归号 {led_stat.get('by_biz', 0)}</span>
+      <span class="pill grey">新号未放行 {led_stat.get('new', 0)}</span>
+    </div>
+    <div class="muted" style="margin-bottom:10px">
+      源料文件夹 {html.escape(str(src_dir))} 里、判重指纹没命中的那些——内容尚未进任何一本书。
+      「biz 可归号」= 号名抽不出但 biz（公众号唯一 ID）跟已归档的号一致，归属确定；
+      「疑似重复」= 标题与已进书某篇相同，多半是同一篇的另一个快照，直接收会重复入书。
+    </div>
+    <table>
+      <thead><tr><th>状态</th><th>公众号</th><th>标题</th><th>文件</th><th class="num">体积</th><th>提示</th></tr></thead>
+      <tbody>{led_rows or '<tr><td colspan="6" class="muted">源料文件夹里没有未收的文章</td></tr>'}</tbody>
+    </table>
+  </div>
 
   <h2>推广图名单</h2>
   <div class="two">

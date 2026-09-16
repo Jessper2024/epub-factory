@@ -19,6 +19,7 @@
 #   ./epub.sh health      系统自检（依赖/磁盘/git/备份/结构/近期异常），输出评分
 #   ./epub.sh backup      备份不可再生资产；verify <包> 校验、list 列清单、clean 老化
 #   ./epub.sh cleanup     空间清理（预演默认；--apply 走废纸篓删中间产物/旧成品/已归档源料）
+#   ./epub.sh ledger      全量文章台账（已进书 + 未收，标疑似重复/可归号/新号）；--md 存成文件
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,6 +66,7 @@ case "$cmd" in
          fi ;;
   check) exec "$PY" "$ENGINE/check_epub.py" "$@" ;;
   cleanup) exec "$PY" "$ENGINE/cleanup.py" "$@" ;;   # 预演；--apply 才真删（走废纸篓）
+  ledger)  exec "$PY" "$ENGINE/ledger.py" "$@" ;;    # 全量文章台账；--md 存成 _文章台账.md
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
 esac
