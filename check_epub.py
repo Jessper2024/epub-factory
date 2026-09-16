@@ -111,8 +111,8 @@ def main():
             continue
         for ep in epubs:
             issues, ext, empty_h, entries = check_epub(ep)
-            print("  %s：正文 %d 篇 · 外链图 %d · 空标题 %d · 文档 %d 个"
-                  % (ep.name, entries, ext, empty_h, len(issues) and entries or entries))
+            print("  %s：月份 %d 个 · 外链图 %d · 空标题 %d"
+                  % (ep.name, entries, ext, empty_h))
             if issues:
                 total_bad += len(issues)
                 for i in issues[:20]:
