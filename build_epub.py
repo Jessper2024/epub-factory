@@ -148,7 +148,9 @@ def elem(parent, tag: str, text: str = None, attrib: dict = None, **attrs):
 
 
 def safe_stem(name: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]+', "_", name).strip(" .") or "未命名"
+    # "%" 也要换掉：libxml2 写文件时把路径当 URI，"%25" 会被再编码出一层，
+    # 读写不对称会让同一个文件越写越多份（2026-09-16 踩过，详见 sigi_convert）
+    return re.sub(r'[\\/:*?"<>|]+', "_", name).replace("%", "％").strip(" .") or "未命名"
 
 
 # ---------------------------------------------------------------- 解析单篇
@@ -993,7 +995,10 @@ def tidy_sources(book_dir: Path) -> int:
                  if el is not first_h1 and (el.get("class") or "") != "article-meta"]
         changed = normalize_headings(nodes)
         if changed:
-            tree.write(str(path), encoding="UTF-8", xml_declaration=True)
+            # 必须走文件句柄写入：etree.write(路径) 会把含 "%" 的文件名当 URI 再编码一层
+            # （"%"→"%25"），写出来的会是另一个新文件——一篇文章就这么悄悄变成两份（踩过）。
+            with open(path, "wb") as fh:
+                tree.write(fh, encoding="UTF-8", xml_declaration=True)
             log("  规范化 %s：%d 处" % (path.name[:40], changed))
             changed_total += changed
     return changed_total

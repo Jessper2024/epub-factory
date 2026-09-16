@@ -353,9 +353,15 @@ def _embed_external_images(
 
 
 def output_stem_for_title(title: str) -> str:
-    """Return a filesystem-safe stem while retaining readable Unicode text."""
+    """Return a filesystem-safe stem while retaining readable Unicode text.
 
-    cleaned = re.sub(r"[\\/:*?\"<>|]+", "_", title).strip(" .")
+    ASCII "%" MUST be swapped for the full-width "％": libxml2 treats a path
+    with "%" as a URI when writing (re-encoding "%" into "%25") but parses
+    by the literal name, so each parse→write cycle mints a new file with one
+    more "%25" layer — one article silently becomes two (verified 2026-09-16).
+    """
+
+    cleaned = re.sub(r"[\\/:*?\"<>|]+", "_", title).replace("%", "％").strip(" .")
     return cleaned or "Article"
 
 
@@ -1869,18 +1875,24 @@ def convert(
 
     tree = etree.ElementTree(root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(
-        str(output_path),
-        encoding="UTF-8",
-        xml_declaration=True,
-        doctype=DOCTYPE,
-        # Do not pretty-print the tree.  lxml's formatter inserts indentation
-        # around inline elements, turning layout whitespace into text (for
-        # example, splitting a heading into ``0/`` and ``前言``).  XHTML is
-        # still valid XML without that presentation formatting, and block
-        # elements remain naturally reflowable in Sigil/readers.
-        pretty_print=False,
-    )
+    # Write through a file handle: lxml/libxml2 treats a path containing "%" as
+    # a URI and re-encodes it ("%"→"%25") on write, while parse() below looks
+    # up the literal name — the mismatch raised OSError and left the source
+    # half-processed, then tidy_sources() re-wrote it under yet another name
+    # so one article quietly became two files (verified 2026-09-16).
+    with open(output_path, "wb") as fh:
+        tree.write(
+            fh,
+            encoding="UTF-8",
+            xml_declaration=True,
+            doctype=DOCTYPE,
+            # Do not pretty-print the tree.  lxml's formatter inserts indentation
+            # around inline elements, turning layout whitespace into text (for
+            # example, splitting a heading into ``0/`` and ``前言``).  XHTML is
+            # still valid XML without that presentation formatting, and block
+            # elements remain naturally reflowable in Sigil/readers.
+            pretty_print=False,
+        )
 
     # Use the same XML-level guarantee Sigil needs before reporting success.
     etree.parse(str(output_path), etree.XMLParser(resolve_entities=False, no_network=True))
