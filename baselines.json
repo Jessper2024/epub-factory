@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-09-17T07:38:04",
-    "git": "a49d18c",
-    "books": 13
+    "updated_at": "2026-09-27T00:20:13",
+    "git": "5ca8678",
+    "books": 14
   },
   "intlsy 的狗窝（未成书）": {
     "source_xhtml": 1
@@ -67,5 +67,13 @@
     "toc": 83,
     "parts": 10,
     "source_xhtml": 15
+  },
+  "高性价比人生指南.epub": {
+    "size_mb": 0.7,
+    "months": 0,
+    "articles": 0,
+    "toc": 35,
+    "parts": 0,
+    "source_xhtml": 33
   }
 }
