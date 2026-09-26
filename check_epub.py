@@ -26,6 +26,20 @@ from core import config  # noqa: E402
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 ROOT = config.root()
 
+
+def _books_root() -> Path:
+    """号目录所在根（与 build_epub._books_root / core.health._books_root 同一判据）。
+
+    2026-09-26 学习工厂迁移：号目录搬进 `02、定稿库/01、微信公众号/`。
+    直接用 ROOT 会把 `01、投递箱 / 02、定稿库 / 03、产物 / 04、EPUB拆解`
+    这些流程目录当成书（实测体检报 4 个「没有 xhtml 源」）。
+    """
+    new = ROOT / "02、定稿库" / "01、微信公众号"
+    marker = ROOT / "_迁移完成.marker"
+    if new.is_dir() and marker.is_file():
+        return new
+    return ROOT
+
 SUBTITLE_MAX = config.get("max_heading_len")        # 文内小标题 h3 / 月份 h1
 ARTICLE_MAX = config.get("article_title_max")       # 文章标题（源 h1 / 合订 h2）
 
@@ -128,7 +142,7 @@ def _book_dirs():
     skip = set(config.get("skip_dirs") or [])
     hint = config.get("backup_hint") or ""
     out = []
-    for d in sorted(ROOT.iterdir()):
+    for d in sorted(_books_root().iterdir()):
         if not d.is_dir() or d.name.startswith((".", "_")):
             continue
         if d.name in skip or (hint and hint in d.name):
@@ -139,7 +153,7 @@ def _book_dirs():
 
 def main():
     if sys.argv[1:]:
-        targets = [ROOT / n for n in sys.argv[1:]]
+        targets = [_books_root() / n for n in sys.argv[1:]]
     else:
         targets = _book_dirs()
 
