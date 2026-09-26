@@ -148,11 +148,27 @@ def _check_failures() -> tuple[str, bool, str]:
     )
 
 
+def _books_root() -> Path:
+    """号目录根（与 build_epub._books_root 同一判据）。
+
+    2026-09-26 学习工厂迁移：号目录搬进 `02、定稿库/01、微信公众号/`。
+    这里**不能再直接用线根**——线根下还有 `01、投递箱 / 03、产物 / 04、EPUB拆解`
+    等流程目录，会被误当成公众号（实测体检把 4 个流程目录报成「缺 xhtml 源」）。
+    """
+    import os
+    root = config.root()
+    new = os.path.join(root, "02、定稿库", "01、微信公众号")
+    marker = os.path.join(root, "_迁移完成.marker")
+    if os.path.isdir(new) and os.path.isfile(marker):
+        return Path(new)
+    return Path(root)
+
+
 def _book_dirs() -> list[Path]:
-    """顶层下真正的公众号目录。判定口径必须与 build_epub.collect_book_dirs 完全一致：
+    """号目录根下真正的公众号目录。判定口径必须与 build_epub.collect_book_dirs 完全一致：
     排除 `.`/`_` 开头、skip_dirs、名字含 backup_hint。两处口径不一致就会出现
     "主脚本认、体检不认（或反之）"的错位。"""
-    root = config.root()
+    root = _books_root()
     skip = set(config.get("skip_dirs") or [])
     hint = config.get("backup_hint") or ""
     out = []

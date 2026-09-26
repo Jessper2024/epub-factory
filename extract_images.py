@@ -4,7 +4,7 @@
 用法：
     python3 extract_images.py <html 文件或目录> [<html 文件或目录> ...] [-o 输出根]
 
-输出结构（默认输出根 ~/Life/EPUB制作/_图片解析）：
+输出结构（默认输出根 ~/Life/学习工厂/02、文稿成品线/_系统件/_图片解析）：
     <输出根>/<篇名>/正文配图/NN_宽x高.ext     # 来自 data-src 的正文插图，按文中出现顺序
     <输出根>/<篇名>/其他/…                     # 封面 / 头像 / 水印 / UI 装饰
     <输出根>/<篇名>/图片清单.json
@@ -195,7 +195,7 @@ def write_index(metas: list, out_root: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="+")
-    ap.add_argument("-o", "--out", default=os.path.expanduser("~/Life/EPUB制作/_图片解析"))
+    ap.add_argument("-o", "--out", default=os.path.expanduser("~/Life/学习工厂/02、文稿成品线/_系统件/_图片解析"))
     ap.add_argument("-n", "--newest", type=int, default=0,
                     help="只处理修改时间最新的 N 个文件（传目录时用）")
     args = ap.parse_args()

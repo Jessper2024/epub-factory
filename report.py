@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成成书报表页面：~/Life/EPUB制作/_报表.html
+"""生成成书报表页面：~/Life/学习工厂/02、文稿成品线/_报表.html
 
 自包含单文件（样式、脚本、封面缩略图全部内联），双击就能看，不需要联网。
 数据全部来自实际文件扫描——HTML 源、XHTML、EPUB、推广图名单、回归基线，
@@ -394,8 +394,10 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
     --muted: #888780; --accent: #185FA5; --ok: #3B6D11; --warn: #854F0B;
   }}
   * {{ box-sizing: border-box; }}
+  *, *::before, *::after {{ font-family: "屏显臻宋", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important; }}
+  code, pre, .mono, kbd {{ font-family: "屏显臻宋", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important; }}
   body {{ margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }}
+    font-size: 14px; line-height: 1.6; }}
   header {{ background: #1F2A37; color: #fff; padding: 22px 28px; }}
   header h1 {{ margin: 0; font-size: 19px; font-weight: 500; }}
   header .meta {{ margin-top: 6px; font-size: 12px; color: #B4B2A9; }}
@@ -428,7 +430,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
   .pill.grey {{ background: #F1EFE8; color: #5F5E5A; }}
   .pill.warn {{ background: #FAEEDA; color: #854F0B; }}
   .epub {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }}
-  .mono {{ font-family: ui-monospace, Menlo, monospace; font-size: 12px; }}
+  .mono {{ font-family: "屏显臻宋", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-size: 12px; }}
   table {{ width: 100%; border-collapse: collapse; background: var(--card);
     border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }}
   th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }}
@@ -449,7 +451,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
 <header>
   <h1>成书{('看板' if live else '报表')}</h1>
   <div class="meta">
-    {('每 %d 秒自动刷新 · 本页生成于 %s' % (refresh_sec, now)) if (live and refresh_sec > 0) else (('按需刷新 · 本页生成于 %s' % now) if live else ('生成于 %s　·　刷新：<code>cd ~/Life/EPUB制作/_engine &amp;&amp; ./epub.sh report</code>' % now))}
+    {('每 %d 秒自动刷新 · 本页生成于 %s' % (refresh_sec, now)) if (live and refresh_sec > 0) else (('按需刷新 · 本页生成于 %s' % now) if live else ('生成于 %s　·　刷新：<code>cd ~/Life/学习工厂/02、文稿成品线/_engine &amp;&amp; ./epub.sh report</code>' % now))}
     　·　数据来自磁盘实际扫描，不自动重扫
     {('　·　<a class="refresh" href="/refresh">立即刷新</a>') if live else ''}
   </div>
@@ -560,7 +562,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
   <pre>{html.escape(report_text)}</pre>
 
   <h2>常用命令</h2>
-  <pre>cd ~/Life/EPUB制作/_engine
+  <pre>cd ~/Life/学习工厂/02、文稿成品线/_engine
 ./epub.sh            # 全部重建
 ./epub.sh inbox      # 收件箱 → 归档 → 成书（也自动吸入浏览器下载目录）
 ./epub.sh check      # 体检

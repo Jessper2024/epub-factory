@@ -2,7 +2,7 @@
 """批量调用 sigi_convert.py 把微信公众号 SingleFile 快照转成 Sigil XHTML。
 
 命名沿用 日期_公众号_作者_标题-Sigil.xhtml，
-与 /Users/jessper/Life/EPUB制作 下已有的成品保持一致。
+与 /Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号 下已有的成品保持一致。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import sigi_convert as S  # noqa: E402
 from lxml import etree, html as LH  # noqa: E402
 
 SRC = Path("/Users/jessper/Downloads/微信公众号下载").expanduser()
-OUT = Path("/Users/jessper/Life/EPUB制作/猫刀笔").expanduser()
+OUT = Path("/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔").expanduser()
 
 
 def target_name(path: Path) -> str:

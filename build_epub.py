@@ -3,13 +3,14 @@
 """
 Sigil XHTML → 合订 EPUB（按公众号分本，按月分章）
 
-本项目位置（2026-09-16 定案，长期不变）
-    代码  ~/Life/EPUB制作/_engine/         本文件所在目录
-    数据  ~/Life/EPUB制作/<公众号名>/       xhtml/ · 原始HTML/ · cover.jpg · *.epub
-    收件箱 ~/Life/EPUB制作/_待处理/
+本项目位置（2026-09-26 学习工厂搬迁后定案，长期不变）
+    代码  ~/Life/学习工厂/02、文稿成品线/_engine/   本文件所在目录
+    数据  ~/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/<公众号名>/
+                                       xhtml/ · 原始HTML/ · cover.jpg · *.epub
+    投递箱 ~/Life/学习工厂/02、文稿成品线/01、投递箱/
 
-目录约定
-    ~/Life/EPUB制作/<公众号名>/         该号所有 -Sigil.xhtml
+目录约定（号目录根由 _books_root() 按迁移标记决定）
+    <号目录根>/<公众号名>/              该号所有 -Sigil.xhtml
 
 结构约定
     月份  → h1      （如「2026年8月」）
@@ -50,7 +51,8 @@ EPUB_NS = "http://www.idpf.org/2007/ops"
 NSMAP = {None: XHTML_NS, "epub": EPUB_NS}
 
 ENGINE_DIR = Path(__file__).resolve().parent          # _engine/（代码所在目录）
-ROOT = ENGINE_DIR.parent                              # ~/Life/EPUB制作（数据根目录）
+ROOT = ENGINE_DIR.parent                              # ~/Life/学习工厂/02、文稿成品线（线根）
+# 号目录实际在 ROOT/02、定稿库/01、微信公众号/ 下，由 _books_root() 决定
 SIGI_DIR = ENGINE_DIR                                 # sigi_convert.py 与本项目同目录
 
 # 每个公众号一个独立文件夹，互不干扰：
@@ -1077,7 +1079,7 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
 
 # ---------------------------------------------------------------- 入口
 def resolve_dir(account: str) -> Path:
-    """把识别出的号名映射到 ~/Life/EPUB制作 下已存在的目录。
+    """把识别出的号名映射到号目录根下已存在的目录。
 
     目录名和文章里的号名可能不完全一致（例如目录「猫刀笔」/ 号名「猫笔刀」），
     直接新建目录会把同一号拆成两本，所以先做同义匹配再考虑新建。
@@ -1103,9 +1105,21 @@ def resolve_dir(account: str) -> Path:
     return direct
 
 
+def _books_root() -> Path:
+    """号目录所在根。
+
+    2026-09-26 学习工厂迁移：号目录搬进 `02、定稿库/01、微信公众号/`；
+    未迁移时仍在 ROOT 根下（旧约定）。用同一条**逐线迁移标记**判断，避免空窗期扫不到号。
+    """
+    new = ROOT / "02、定稿库" / "01、微信公众号"
+    if new.is_dir() and _MIGRATED.is_file():
+        return new
+    return ROOT
+
+
 def collect_book_dirs():
-    """顶层下每个子目录就是一个公众号，彼此隔离。"""
-    return sorted(d for d in ROOT.iterdir()
+    """号目录根下每个子目录就是一个公众号，彼此隔离。"""
+    return sorted(d for d in _books_root().iterdir()
                   if d.is_dir() and not d.name.startswith((".", "_"))
                   and d.name not in SKIP_DIRS and BACKUP_HINT not in d.name)
 
@@ -1209,10 +1223,17 @@ def tidy_sources(book_dir: Path) -> int:
     return changed_total
 
 
-# 只盯这一个文件夹（陈少 2026-09-16 定，2026-09-16 下午更新）：
+# 只盯这一个文件夹（陈少 2026-09-16 定，2026-09-16 下午更新；2026-09-26 学习工厂迁移）：
 # 新文章存这里，定时任务每小时收一次。这个文件夹以外的任何地方都不碰。
 # 目录里再套一层子文件夹也能收到（SCAN_SUBDIRS）。
-WATCH_DIR = Path("/Users/jessper/Life/01、源料_微信公众号下载")
+# 迁移策略（与 ROOT 同思路）：**双路径探测**——新投递箱（学习工厂/02、文稿成品线/01、投递箱）
+# 已建且非空 → 用新箱；否则退回旧源料目录。搬完数据后无需改代码，自动切换。
+_WATCH_NEW = Path("/Users/jessper/Life/学习工厂/02、文稿成品线/01、投递箱")
+_WATCH_LEGACY = Path("/Users/jessper/Life/01、源料_微信公众号下载")
+# 迁移标记：P2 搬完数据后创建；删掉它 → 回退旧源料目录（人工回滚开关）
+# 逐线标记：文稿成品线迁完才切 WATCH_DIR
+_MIGRATED = Path("/Users/jessper/Life/学习工厂/02、文稿成品线/_迁移完成.marker")
+WATCH_DIR = _WATCH_NEW if _MIGRATED.is_file() else _WATCH_LEGACY
 SCAN_SUBDIRS = 1
 EXTRA_SOURCES = [WATCH_DIR]
 
@@ -1515,7 +1536,7 @@ def book_span(book: Path) -> tuple[str, str, int]:
 
 
 def refresh_ledger() -> Path:
-    """刷新 ~/Life/EPUB制作/_台账.md——所有书的一览，随时能看清家底。"""
+    """刷新线根下的 _台账.md——所有书的一览，随时能看清家底。"""
     path = ROOT / "_台账.md"
     lines = ["# 成书台账", "",
              "由 build_epub.py 自动刷新，别手改（改了会被覆盖）。", "",
@@ -1600,7 +1621,7 @@ def write_report(built: list[str]) -> Path:
     if built:
         lines.append("## 重建的书")
         for name in built:
-            book = ROOT / name
+            book = _books_root() / name
             epubs = sorted(book.glob("*.epub"))
             for ep in epubs:
                 st = epub_stats(ep)
@@ -1747,12 +1768,12 @@ def main() -> int:
         return 1 if not touched else 0
 
     if args.only:
-        dirs = [ROOT / args.only]
+        dirs = [_books_root() / args.only]
     else:
         dirs = collect_book_dirs()
 
     if not dirs:
-        log("没有找到公众号目录：", ROOT)
+        log("没有找到公众号目录：", _books_root())
         return 1
 
     built: list[str] = []

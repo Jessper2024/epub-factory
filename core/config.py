@@ -37,13 +37,26 @@ ROOT = ENGINE_DIR.parent
 
 LOCAL_FILE = ENGINE_DIR / "config.local.json"
 
+# ---------------------------------------------------------------- 源料文件夹（双路径）
+# 学习工厂搬迁期：源料文件夹从 ~/Life/01、源料_微信公众号下载 迁到
+# 学习工厂/02、文稿成品线/01、投递箱。删掉 _迁移完成.marker 即可整体回退旧根。
+_WATCH_NEW = ROOT / "01、投递箱"
+_WATCH_LEGACY = Path("/Users/jessper/Life/01、源料_微信公众号下载")
+_MIGRATED = ROOT / "_迁移完成.marker"
+
+
+def _default_watch_dir() -> Path:
+    """源料文件夹按迁移标记在「新投递箱 vs 旧源料目录」间切换（与 build_epub.WATCH_DIR 同判据）。"""
+    return _WATCH_NEW if _MIGRATED.is_file() else _WATCH_LEGACY
+
+
 # ---------------------------------------------------------------- 默认值
 # 全部等于改造前 build_epub.py 里的硬编码值，一个都不能随手改。
 DEFAULTS: dict = {
     # —— 路径 ——
     "engine_dir": str(ENGINE_DIR),
     "root": str(ROOT),
-    "watch_dir": "/Users/jessper/Life/01、源料_微信公众号下载",   # 源料文件夹（只盯这一个）
+    "watch_dir": str(_default_watch_dir()),   # 源料文件夹（只盯这一个；随迁移标记切换）
     "xhtml_subdir": "xhtml",          # 不可再生：EPUB 由它重建
     "raw_subdir": "原始HTML",          # 不可再生：转换前的原 HTML
     "cover_name": "cover.jpg",

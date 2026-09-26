@@ -17,7 +17,7 @@
 用法：
   python3 wechat_to_sigil_xhtml.py \
       --src "~/Downloads/微信公众号下载" \
-      --out "/Users/jessper/Life/EPUB制作/猫刀笔"
+      --out "/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔"
 """
 import os, re, sys, glob, argparse, base64, urllib.request, urllib.error
 from lxml import html as LH
@@ -890,7 +890,7 @@ def convert_file(path, out_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default=os.path.expanduser("~/Downloads/微信公众号下载"))
-    ap.add_argument("--out", default="/Users/jessper/Life/EPUB制作/猫刀笔")
+    ap.add_argument("--out", default="/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     files = sorted(glob.glob(os.path.join(os.path.expanduser(args.src), "*.html")))
