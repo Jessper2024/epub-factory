@@ -19,7 +19,12 @@ LOG_DIR="$HOME/Library/Logs"
 LOG="$LOG_DIR/epub-inbox.log"
 UID_NUM="$(id -u)"
 INTERVAL="${INBOX_INTERVAL:-3600}"      # 秒；默认 1 小时
-WATCH="/Users/jessper/Life/01、源料_微信公众号下载"
+# 2026-09-26 学习工厂搬迁：源料文件夹 → 学习工厂/02、文稿成品线/01、投递箱。
+# 这里只是给 status/安装提示看的显示值，真正扫描由 build_epub.WATCH_DIR 决定（同一判据）。
+_WATCH_NEW="/Users/jessper/Life/学习工厂/02、文稿成品线/01、投递箱"
+_WATCH_LEGACY="/Users/jessper/Life/01、源料_微信公众号下载"
+_MIGRATED="/Users/jessper/Life/学习工厂/02、文稿成品线/_迁移完成.marker"
+if [ -f "$_MIGRATED" ]; then WATCH="$_WATCH_NEW"; else WATCH="$_WATCH_LEGACY"; fi
 
 cmd_install() {
   mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
