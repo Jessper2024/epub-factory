@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "updated_at": "2026-10-13T14:57:37",
-    "git": "d06f8d0",
+    "updated_at": "2026-10-13T20:37:04",
+    "git": "1b2a1e9",
     "books": 39
   },
   "DeepSeek_202604-202609.epub": {
@@ -133,7 +133,7 @@
     "source_xhtml": 35
   },
   "格隆汇图解天下_202610.epub": {
-    "size_mb": 0.7,
+    "size_mb": 0.6,
     "months": 0,
     "articles": 2,
     "toc": 6,

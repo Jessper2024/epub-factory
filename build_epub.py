@@ -888,12 +888,13 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     uid = "urn:uuid:wechat-%s-%s" % (safe_stem(account), dt.datetime.now().strftime("%Y%m%d%H%M%S"))
     modified = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cover_id = ""
+    platform = platform_label(book_dir)
     if should_split_by_month(account, book_dir):
-        cover_bytes = make_cover_bytes(account, span)   # 主视觉 = 月份
+        # 按月分册（目前只有微信公众号有此情况）：封面带月份
+        cover_bytes = make_cover_bytes(account, platform, span)
     else:
-        # 非分册号（一个作者一本）：主视觉 = 篇数（陈少 2026-10-13 定）
-        hero = "%d 篇" % len(arts)
-        cover = ensure_cover(book_dir, account, hero, force=COVER_REGEN)
+        # 一个作者一本：下面不写月份（陈少 2026-10-13：不是整月就不写）
+        cover = ensure_cover(book_dir, account, "", force=COVER_REGEN)
         cover_bytes = cover.read_bytes() if (cover and cover.exists()) else None
 
     items: list[tuple[str, str, str]] = [
@@ -1527,16 +1528,19 @@ def _cover_font(size: int):
     return ImageFont.load_default()
 
 
-def render_cover(account: str, hero: str) -> bytes:
-    """统一封面模板：米白底 + 屏显臻宋 + 大字号主视觉 + 落款（陈少 2026-10-13 定）。
+def render_cover(account: str, platform: str, month: str = "") -> bytes:
+    """统一封面模板（陈少 2026-10-13 定，第二版）。
 
-    分册号与非分册号**共用这一套视觉语言**，只是主视觉（hero）不同：
-      分册号   hero = 月份（如「2026年9月」）—— 每月一本，月份才区分得开
-      非分册号 hero = 篇数（如「39 篇」）—— 一个作者一本，篇数说明内容多少
+    三段式，米白底 + 屏显臻宋：
+        上：作者 / 号名
+        中：平台来源（微信公众号 / 知乎 / 小红书 / 微博 / Twitter）
+        下：月份（**只写整月**，如「2026年9月」；不是整月就留空）
 
-    为什么非分册号的主视觉用篇数而不是号名：
-      号名放到 176px 会太长（英文名如 HugoBossTang 要缩到 88% 宽度才塞得下，
-      反而不好看）；篇数是数字，同字号视觉最稳。号名放中号在上方，身份依然清楚。
+    **不要「N 篇」，不要「沪上陈少 藏」落款**（陈少 2026-10-13 明确）。
+    月份只有按月分册的书才写（目前只有微信公众号有这个情况），
+    一个作者一本的（知乎/小红书/Twitter）下面留空。
+
+    为什么作者放上、平台放中：读者先认「这是谁写的」，再认「从哪来的」。
     """
     from PIL import Image, ImageDraw
     import io
@@ -1546,64 +1550,99 @@ def render_cover(account: str, hero: str) -> bytes:
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    def center(text: str, f, top: int, fill: str = INK):
+    # 量每段：超宽自动缩字号（绝不溢出，Kindle 裁边就废了），并取真实字高
+    entries = [(account, 96, INK, 0.84)]
+    if platform:
+        entries.append((platform, 104, SUB, 0.84))
+    if month:
+        entries.append((month, 88, SUB, 0.80))
+
+    measured = []
+    for text, size, fill, mw in entries:
+        f = _cover_font(size)
+        while size > 28:
+            box = draw.textbbox((0, 0), text, font=f)
+            if (box[2] - box[0]) <= W * mw:
+                break
+            size -= 4
+            f = _cover_font(size)
         box = draw.textbbox((0, 0), text, font=f)
-        draw.text(((W - (box[2] - box[0])) / 2 - box[0], top - box[1]),
+        measured.append((text, f, fill, box[3] - box[1], box))
+
+    # 整体垂直居中：总高 = 各段真实字高 + 段间净空，再定起点
+    GAP = 110                                   # 段与段之间的净空
+    LINE_AT = 55                                # 分隔线距上一段字底（落在净空里）
+    n = len(measured)
+    total = sum(m[3] for m in measured) + GAP * (n - 1)
+    # 视觉重心略高于正中（陈少 2026-10-13）：纯几何居中看起来会偏下，
+    # 整体上移 8% 落回视觉舒适区。
+    y = int((H - total) / 2) - int(H * 0.04)
+
+    for idx, (text, f, fill, th, box) in enumerate(measured):
+        if idx:
+            y += GAP
+        if idx == 1 and n > 1:
+            # 作者 → 第二段之间的分隔线
+            draw.line([(W / 2 - 130, y - GAP + LINE_AT),
+                       (W / 2 + 130, y - GAP + LINE_AT)], fill=LINE, width=2)
+        draw.text(((W - (box[2] - box[0])) / 2 - box[0], y - box[1]),
                   text, font=f, fill=fill)
-
-    # 号名（中号，上部）。太长自动缩，别顶到边
-    nsize = 96
-    while nsize > 40:
-        box = draw.textbbox((0, 0), account, font=_cover_font(nsize))
-        if (box[2] - box[0]) <= W * 0.84:
-            break
-        nsize -= 6
-    center(account, _cover_font(nsize), 430, INK)
-
-    draw.line([(W / 2 - 130, 580), (W / 2 + 130, 580)], fill=LINE, width=2)
-
-    if hero:
-        hsize = 176
-        box = draw.textbbox((0, 0), hero, font=_cover_font(hsize))
-        hw = box[2] - box[0]
-        if hw > W * 0.88:                       # 自适应不溢出
-            hsize = int(hsize * W * 0.88 / hw)
-        center(hero, _cover_font(hsize), 760, INK)
-
-    center("沪上陈少 藏", _cover_font(44), H - 170, SUB)
+        y += th
 
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=90)
     return buf.getvalue()
 
 
-def ensure_cover(book_dir: Path, account: str, hero: str,
+def platform_label(book_dir: Path) -> str:
+    """作者目录 → 封面要印的平台名（陈少 2026-10-13 定）。
+
+    目录名（01、微信公众号 / 02、知乎 / 03、小红书 / 04、微博 / 05、Twitter）
+    去掉序号就是平台名；Twitter 保留英文（陈少指定）。认不出返回空。
+    """
+    try:
+        parts = book_dir.resolve().parts
+    except OSError:
+        parts = book_dir.parts
+    for name in parts:
+        for d in _PLATFORM_DIRS:
+            if name == d:
+                label = d.split("、", 1)[-1]
+                return label
+    return ""
+
+
+def ensure_cover(book_dir: Path, account: str, month: str = "",
                  force: bool = False) -> Path | None:
-    """号文件夹的 cover.jpg。有就复用（方便自己换图）；force=True 无条件重生成。"""
+    """号文件夹的 cover.jpg。有就复用（方便自己换图）；force=True 无条件重生成。
+
+    month 只有按月分册的书才传（如「2026年9月」），一个作者一本的传空。
+    平台名自动从目录推断，不用调用方传。
+    """
     cover = book_dir / COVER_NAME
     if cover.exists() and not force:
         return cover
     try:
-        data = render_cover(account, hero)
+        data = render_cover(account, platform_label(book_dir), month)
     except ImportError:
         log("  未装 Pillow，跳过封面生成")
         return None
     cover.write_bytes(data)
-    log("  生成封面（米白+屏显臻宋）：", cover.name, hero)
+    log("  生成封面（米白+屏显臻宋）：", cover.name)
     return cover
 
 
-def make_cover_bytes(account: str, span: str) -> bytes | None:
-    """分册号封面（内存生成、不落盘）：主视觉 = 月份。
+def make_cover_bytes(account: str, platform: str, month: str) -> bytes | None:
+    """分册号封面（内存生成、不落盘）：每月一本，封面带月份。
 
     每月封面不同，号目录一个 cover.jpg 不够用，所以直接返回 bytes 嵌进当月那本。
     """
     try:
-        data = render_cover(account, span)
+        data = render_cover(account, platform, month)
     except ImportError:
         log("  未装 Pillow，跳过封面生成")
         return None
-    log("  生成封面（米白+屏显臻宋）：", account, span)
+    log("  生成封面（米白+屏显臻宋）：", account, platform, month)
     return data
 
 
