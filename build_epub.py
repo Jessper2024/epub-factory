@@ -761,22 +761,27 @@ def build_toc_page(months: list[tuple[str, str, list[Article]]], anchor_ids: dic
     body = elem(root, "body")
     body.set("class", "toc-page")
     elem(body, "h1", text="目录", attrib={"class": "toc-title"})
+    # href 要相对 toc.xhtml 自己所在目录（OEBPS/Text/）：file_of_month 存的是
+    # 「Text/part001.xhtml」（相对 OPF 根，供 nav/ncx 用），这里要剥掉 "Text/" 前缀。
+    def _rel(href: str) -> str:
+        return href[len("Text/"):] if href.startswith("Text/") else href
+
     ol = elem(body, "ol", attrib={"class": "toc-list"})
     if single:
         month_key, _, arts = months[0]
         for art in arts:
             li = elem(ol, "li")
             elem(li, "a", text=art.heading,
-                 attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+                 attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), anchor_ids[id(art)])})
     else:
         for month_key, label, arts in months:
             li = elem(ol, "li")
-            elem(li, "a", text=label, attrib={"href": file_of_month[month_key]})
+            elem(li, "a", text=label, attrib={"href": _rel(file_of_month[month_key])})
             sub = elem(li, "ol")
             for art in arts:
                 sli = elem(sub, "li")
                 elem(sli, "a", text=art.heading,
-                     attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+                     attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), anchor_ids[id(art)])})
     return root
 
 

@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T05:40:47",
-    "git": "166981b",
-    "books": 44
+    "updated_at": "2026-10-14T05:50:41",
+    "git": "fbbe506",
+    "books": 43
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -27,14 +27,6 @@
     "toc": 1,
     "parts": 1,
     "source_xhtml": 1
-  },
-  "九边_202609.epub": {
-    "size_mb": 0.1,
-    "months": 0,
-    "articles": 1,
-    "toc": 1,
-    "parts": 1,
-    "source_xhtml": 17
   },
   "九边六镇合集.epub": {
     "size_mb": 2.0,
