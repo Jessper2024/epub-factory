@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T00:19:46",
-    "git": "14bf413",
-    "books": 42
+    "updated_at": "2026-10-14T03:22:55",
+    "git": "068f1ff",
+    "books": 43
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -235,6 +235,14 @@
     "toc": 11,
     "parts": 1,
     "source_xhtml": 1
+  },
+  "重远投资观_202106-202610.epub": {
+    "size_mb": 5.0,
+    "months": 13,
+    "articles": 17,
+    "toc": 80,
+    "parts": 13,
+    "source_xhtml": 17
   },
   "阿马有你真好_202206-202609.epub": {
     "size_mb": 0.9,
