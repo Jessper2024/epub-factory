@@ -127,16 +127,17 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
         print("  ✗ 认不出作者，跳过：%s" % info["path"].name)
         return None
 
-    dest_dir = P.book_dir(key, author) / "xhtml"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    # 判重：标题归一化后与已有 xhtml 比对（老快照没有 sn 时唯一的办法）
+    # 先判重再建目录：book_dir() 会创建目录，若判重挡下就会留下空壳目录
+    # （2026-10-13 踩过：测试时留下 05、Twitter/<作者>/xhtml 空目录）。
     dup = find_duplicate_title(info["title"])
     if dup:
         print("  ⊘ 已在库中，跳过并清理原件：%s → %s" % (info["path"].name, dup))
         if not dry_run:
             move_to_trash(info["path"])
         return None
+
+    dest_dir = P.book_dir(key, author) / "xhtml"
+    dest_dir.mkdir(parents=True, exist_ok=True)
 
     stem = "_".join(x for x in (info["date"], author, info["title"]) if x)
     out = dest_dir / (safe_stem(stem) + "-Sigil.xhtml")
