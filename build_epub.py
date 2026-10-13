@@ -165,7 +165,11 @@ def elem(parent, tag: str, text: str = None, attrib: dict = None, **attrs):
 def safe_stem(name: str) -> str:
     # "%" 也要换掉：libxml2 写文件时把路径当 URI，"%25" 会被再编码出一层，
     # 读写不对称会让同一个文件越写越多份（2026-09-16 踩过，详见 sigi_convert）
-    return re.sub(r'[\\/:*?"<>|]+', "_", name).replace("%", "％").strip(" .") or "未命名"
+    # 结尾要 strip 下划线：标题结尾的 `?`/`!` 会变成 `_`，留在文件名末尾会让
+    # 后续 split 出空段、把标题误判成作者（陈少 2026-10-14 报的 bug）——根治。
+    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name).replace("%", "％")
+    cleaned = re.sub(r"_+", "_", cleaned)          # 合并连续下划线
+    return cleaned.strip(" ._") or "未命名"
 
 
 # ---------------------------------------------------------------- 解析单篇
@@ -421,6 +425,15 @@ def parse_article(path: Path) -> Article | None:
         account = m_account
     if not author:
         author = m_author
+
+    # 防御：作者被误判成标题（如「吹警校」那种尾部 `_` 空段 bug）会静默写错。
+    # 作者若等于标题、或等于标题的净化版，说明抽取失败——报出来而不是硬写。
+    if author and title and (author == title
+                             or author == safe_stem(title)
+                             or author in title and len(author) >= len(title) * 0.8):
+        log("  ⚠ 作者疑似抽错（作者==标题）：%s | 作者=%r 标题=%r"
+            % (path.name[:40], author, title))
+        author = ""
 
     # 小标题规范化：与 tidy_sources 共用同一套判定，
     # 保证「源文件在 Sigil 里看到的」和「合订出的 EPUB 目录」完全一致。
