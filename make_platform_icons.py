@@ -56,43 +56,41 @@ def _font(size: int):
 
 
 def _draw_wechat(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
-    """对话气泡 + 两个点（微信标志的简化）"""
+    """彩色底版：绿底已经由外框填充，画**白色**气泡 + 绿点"""
     w, h = 150, 122
     d.rounded_rectangle([cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2 - 16],
-                        radius=40, fill=color)
-    # 气泡小尾巴
+                        radius=40, fill="#FFFFFF")
     d.polygon([(cx - 34, cy + h // 2 - 18), (cx - 4, cy + h // 2 - 18),
-               (cx - 30, cy + h // 2 + 10)], fill=color)
-    # 两个白点
+               (cx - 30, cy + h // 2 + 10)], fill="#FFFFFF")
     for dx in (-32, 32):
-        d.ellipse([cx + dx - 11, cy - 24, cx + dx + 11, cy - 2], fill="#FFFFFF")
+        d.ellipse([cx + dx - 11, cy - 24, cx + dx + 11, cy - 2], fill=color)
 
 
 def _draw_zhihu(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
-    """白底蓝框 + 「知」字"""
+    """彩色底版：蓝底（由外框填）+ 白「知」"""
     f = _font(180)
     txt = "知"
     box = d.textbbox((0, 0), txt, font=f)
     d.text((cx - (box[2] - box[0]) / 2 - box[0], cy - (box[3] - box[1]) / 2 - box[1]),
-           txt, font=f, fill=color)
+           txt, font=f, fill="#FFFFFF")
 
 
 def _draw_twitter(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
-    """X 字母（两条粗斜线）"""
+    """彩色底版：黑底（外框填）+ 白 X"""
     s = 82
     w = 30
-    d.line([(cx - s, cy - s), (cx + s, cy + s)], fill=color, width=w)
-    d.line([(cx + s, cy - s), (cx - s, cy + s)], fill=color, width=w)
+    d.line([(cx - s, cy - s), (cx + s, cy + s)], fill="#FFFFFF", width=w)
+    d.line([(cx + s, cy - s), (cx - s, cy + s)], fill="#FFFFFF", width=w)
 
 
 def _draw_weibo(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
-    """微博眼睛 + 信号弧"""
-    # 眼睛轮廓（横椭圆）
-    d.ellipse([cx - 96, cy - 44, cx + 52, cy + 52], fill=color)
-    # 眼白
-    d.ellipse([cx - 72, cy - 26, cx + 30, cy + 34], fill="#FFFFFF")
-    # 瞳孔
-    d.ellipse([cx - 40, cy - 16, cx + 4, cy + 24], fill=color)
+    """彩色底版：橙底（外框填）+ 白眼睛 + 白信号弧"""
+    d.ellipse([cx - 96, cy - 44, cx + 52, cy + 52], fill="#FFFFFF")
+    d.ellipse([cx - 72, cy - 26, cx + 30, cy + 34], fill=color)
+    d.ellipse([cx - 40, cy - 16, cx + 4, cy + 24], fill="#FFFFFF")
+    for rr in (38, 60, 82):
+        d.arc([cx + 30 - rr, cy - 30 - rr, cx + 30 + rr, cy - 30 + rr],
+              start=-78, end=-14, fill="#FFFFFF", width=11)
     # 信号弧（右上）
     for i, rr in enumerate((38, 60, 82)):
         d.arc([cx + 30 - rr, cy - 30 - rr, cx + 30 + rr, cy - 30 + rr],
@@ -100,7 +98,7 @@ def _draw_weibo(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
 
 
 def _draw_xiaohongshu(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
-    """「小红书」三个字横排（竖排在方框里挤，横排更好认）。"""
+    """彩色底版：红底（外框填）+ 白「小红书」横排。"""
     f = _font(74)
     txt = "小红书"
     gap = 4
@@ -112,7 +110,7 @@ def _draw_xiaohongshu(d: ImageDraw.ImageDraw, color: str, cx: int, cy: int):
     x = cx - total / 2
     for i, ch in enumerate(txt):
         b = d.textbbox((0, 0), ch, font=f)
-        d.text((x - b[0], cy - (b[3] - b[1]) / 2 - b[1]), ch, font=f, fill=color)
+        d.text((x - b[0], cy - (b[3] - b[1]) / 2 - b[1]), ch, font=f, fill="#FFFFFF")
         x += widths[i] + gap
 
 
@@ -131,9 +129,8 @@ def build(outdir: Path) -> list[Path]:
     for name, color, key in PLATFORMS:
         img = Image.new("RGB", (SIZE, SIZE), "#FFFFFF")
         d = ImageDraw.Draw(img)
-        # 白底 + 平台色圆角边框
-        d.rounded_rectangle([PAD, PAD, PAD + BOX, PAD + BOX], radius=R,
-                            fill="#FFFFFF", outline=color, width=BORDER)
+        # 原版形式：平台色圆角底（陈少 2026-10-13 截图「位置格式形式全部保留」）
+        d.rounded_rectangle([PAD, PAD, PAD + BOX, PAD + BOX], radius=R, fill=color)
         DRAWERS[key](d, color, SIZE // 2, SIZE // 2)
         out = outdir / ("%s.png" % key)
         img.save(out, "PNG")

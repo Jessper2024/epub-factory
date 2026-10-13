@@ -77,6 +77,7 @@ case "$cmd" in
   cleanup) exec "$PY" "$ENGINE/cleanup.py" "$@" ;;   # 预演；--apply 才真删（走废纸篓）
   ledger)  exec "$PY" "$ENGINE/ledger.py" "$@" ;;    # 全量文章台账；--md 存成 _文章台账.md
   emoji)  exec "$PY" "$ENGINE/tag_emoji_sources.py" "$@" ;;  # 全量回改源 xhtml：补 emoji 标记+样式
+  pdf)    exec "$PY" "$ENGINE/html_to_pdf.py" "$@" ;;        # 按需：从 html/ 留底重出 PDF（PDF 线暂停，需手动触发）
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
 esac

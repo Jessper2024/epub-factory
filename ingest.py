@@ -221,26 +221,16 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     link_index.register(info.get("url", ""),
                         "%s/%s/%s" % (P.PLATFORMS[key], author, out.name))
 
-    # ── PDF 独立线（陈少 2026-10-13 定）：原始 HTML 留底 + 自动出 PDF ──
-    # 三个目录并列：xhtml/（阅读器）· html/（原始留底）· pdf/（打印版）。
-    # PDF 保留属性表（xhtml 里剥掉了），版式独立，互不干涉。
-    try:
-        book_dir = P.book_dir(key, author)
-        html_dir = book_dir / "html"
-        html_dir.mkdir(parents=True, exist_ok=True)
-        kept = html_dir / (safe_stem(stem) + ".html")
-        if not kept.exists():
-            shutil.copy2(info["path"], kept)
-            print("  ✓ 留底：%s/html/%s" % (P.PLATFORMS[key], kept.name[:40]))
-        import html_to_pdf as HP
-        pdf_dir = book_dir / "pdf"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        pdf_out = pdf_dir / (safe_stem(stem) + ".pdf")
-        if not pdf_out.exists() and HP.convert_one(info["path"], pdf_out):
-            print("  ✓ PDF：%s/pdf/%s" % (P.PLATFORMS[key], pdf_out.name[:40]))
-    except Exception as exc:              # PDF 失败不影响 epub 线
-        _pg(info["path"].name, "fail", "PDF: %s" % str(exc)[:60])
-        print("  ⚠ PDF 线出错（epub 不受影响）：%s" % str(exc)[:80])
+    # ── html 原始留底（陈少 2026-10-13 定）：入料时 copy 一份，原件仍进废纸篓 ──
+    # 说明：PDF 线**暂停**（陈少 2026-10-13：PDF 暂不成熟，后续再想）。
+    # html 留底保留，将来 PDF 按需从 html/ 重出（`./epub.sh pdf`）。
+    book_dir = P.book_dir(key, author)
+    html_dir = book_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    kept = html_dir / (safe_stem(stem) + ".html")
+    if not kept.exists():
+        shutil.copy2(info["path"], kept)
+        print("  ✓ 留底：%s/html/%s" % (P.PLATFORMS[key], kept.name[:40]))
 
     move_to_trash(info["path"])
     _pg(info["path"].name, "ok", "", "%s/%s" % (P.PLATFORMS[key], author))
