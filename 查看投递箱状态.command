@@ -38,7 +38,7 @@ else
   echo "  还有 $N 个待处理："
   ls "$BOX" 2>/dev/null | grep -v '^\.' | sed 's/^/    /'
   echo
-  echo "  → 想立刻处理：双击桌面「立刻处理投递箱.command」"
+  echo "  → 想立刻处理：双击桌面「处理投递箱.command」"
 fi
 echo
 
