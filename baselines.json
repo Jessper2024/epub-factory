@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-13T14:22:05",
-    "git": "92082e2",
-    "books": 43
+    "updated_at": "2026-10-13T14:37:48",
+    "git": "5d20127",
+    "books": 44
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -292,7 +292,15 @@
     "parts": 1,
     "source_xhtml": 33
   },
-  "WaWoWaWo678_202601.epub": {
+  "HugoBossTang.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 2,
+    "toc": 10,
+    "parts": 1,
+    "source_xhtml": 2
+  },
+  "WaWoWaWo678.epub": {
     "size_mb": 0.0,
     "months": 0,
     "articles": 1,
@@ -300,7 +308,7 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "子不语999_202501.epub": {
+  "子不语999.epub": {
     "size_mb": 0.0,
     "months": 0,
     "articles": 1,
@@ -308,7 +316,15 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "经营有数_202601.epub": {
+  "秦尔迪亚.epub": {
+    "size_mb": 0.0,
+    "months": 2,
+    "articles": 3,
+    "toc": 5,
+    "parts": 2,
+    "source_xhtml": 3
+  },
+  "经营有数.epub": {
     "size_mb": 0.0,
     "months": 0,
     "articles": 1,
@@ -316,7 +332,7 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "周不渡_202609.epub": {
+  "周不渡.epub": {
     "size_mb": 4.1,
     "months": 0,
     "articles": 3,
@@ -324,15 +340,7 @@
     "parts": 1,
     "source_xhtml": 3
   },
-  "周不渡_合集.epub": {
-    "size_mb": 1.9,
-    "months": 0,
-    "articles": 1,
-    "toc": 1,
-    "parts": 1,
-    "source_xhtml": 3
-  },
-  "Morris_202609.epub": {
+  "Morris.epub": {
     "size_mb": 0.0,
     "months": 0,
     "articles": 3,
@@ -340,7 +348,7 @@
     "parts": 1,
     "source_xhtml": 3
   },
-  "jasonleo_202609-202610.epub": {
+  "jasonleo.epub": {
     "size_mb": 0.0,
     "months": 2,
     "articles": 3,

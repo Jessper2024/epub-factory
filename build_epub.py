@@ -764,11 +764,12 @@ def years_in(book_dir: Path) -> list[int]:
 def build_all(account: str, book_dir: Path, split_year: bool = False) -> list[Path]:
     """出一本 / 按年出多本 / 按月出多本。
 
-    - account 在 SPLIT_MONTH_ACCOUNTS：每月一本（号名_202609.epub、号名_202610.epub）
+    - 该按月分册（公众号点名号，或非公众号线 ≥100 篇）：每月一本
+      （号名_202609.epub、号名_202610.epub）
     - split_year=True：每年一本（号名_2025.epub、号名_2026.epub）
     - 否则：单本合订（号名_YYYYMM[-YYYYMM].epub）
     """
-    if account in SPLIT_MONTH_ACCOUNTS:
+    if should_split_by_month(account, book_dir):
         src_dir = source_dir(book_dir)
         keys: set[str] = set()
         for p in sorted(src_dir.glob("*.xhtml")):
@@ -868,18 +869,26 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     author = account  # 图书作者 = 公众号博主，不是文章里的笔名（如 moomoocat）
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    # 沿用已有命名习惯：202608_猫刀笔.epub / 202608-202609_猫刀笔.epub
-    if dates:
-        first_tag = "%04d%02d" % (dates[0][0], dates[0][1])
-        last_tag = "%04d%02d" % (dates[-1][0], dates[-1][1])
-        prefix = first_tag if first_tag == last_tag else "%s-%s" % (first_tag, last_tag)
+    # 命名规则（陈少 2026-10-13 定）：
+    #   非公众号线（知乎/小红书/微博/Twitter）不分册时 → **号名.epub**（不带月份）
+    #     理由：这些线是"一个作者一本"，月份范围对读者没意义，写进文件名反而碍事。
+    #   公众号线 → 沿用月份范围（号名_202608.epub / 号名_202608-202609.epub）
+    single_no_month = (is_non_wechat_platform(book_dir)
+                       and not should_split_by_month(account, book_dir))
+    if single_no_month:
+        out_path = out_dir / ("%s.epub" % safe_stem(account))
     else:
-        prefix = "合集"
-    out_path = out_dir / ("%s_%s.epub" % (safe_stem(account), prefix))
+        if dates:
+            first_tag = "%04d%02d" % (dates[0][0], dates[0][1])
+            last_tag = "%04d%02d" % (dates[-1][0], dates[-1][1])
+            prefix = first_tag if first_tag == last_tag else "%s-%s" % (first_tag, last_tag)
+        else:
+            prefix = "合集"
+        out_path = out_dir / ("%s_%s.epub" % (safe_stem(account), prefix))
     uid = "urn:uuid:wechat-%s-%s" % (safe_stem(account), dt.datetime.now().strftime("%Y%m%d%H%M%S"))
     modified = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cover_id = ""
-    if account in SPLIT_MONTH_ACCOUNTS:
+    if should_split_by_month(account, book_dir):
         cover_bytes = make_cover_bytes(account, span)   # 米白底+屏显臻宋+大月份
     else:
         cover = ensure_cover(book_dir, account, span)
@@ -1056,8 +1065,13 @@ def publish_blocked(book_dir: Path) -> str | None:
 
     已有成品的书直接放行：否则书会停在旧版本、界面上也看不出异样，没人会发现。
     """
-    if book_dir.name in SPLIT_MONTH_ACCOUNTS:
+    if should_split_by_month(book_dir.name, book_dir):
         return None  # 分册号豁免 30 篇门槛：每月独立出书，单月哪怕 1 篇也出
+    # 非公众号线（知乎/小红书/微博/Twitter）豁免 30 篇门槛（陈少 2026-10-13 定：
+    # "全量补齐" —— 这些线的规则是一个作者一本，没有攒够篇数才出书的说法）。
+    # 公众号保持原门槛不变。
+    if is_non_wechat_platform(book_dir):
+        return None
     if MIN_PUBLISH <= 0:
         return None
     if any(book_dir.glob("*.epub")):
@@ -1461,6 +1475,32 @@ COVER_FONT_PATH = "/Users/jessper/Library/Fonts/方正屏显臻宋.TTF"
 # 按月分册的号（陈少 2026-10-11 定）：每月独立一本 号_YYYYMM.epub，
 # 封面用米白底+屏显臻宋+大字号月份；其他号保持单本合订不变。
 SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀"}
+
+# 非公众号线（知乎/小红书/微博/Twitter）的分册门槛（陈少 2026-10-13 定）：
+#   ≥ 100 篇 → 按月分册；< 100 篇 → **一个作者一本**（号名.epub，不带月份）。
+# 公众号是单独规则（看上方的 SPLIT_MONTH_ACCOUNTS），不适用这个门槛。
+PLATFORM_MONTH_SPLIT_MIN = 100
+
+
+def is_non_wechat_platform(book_dir: Path) -> bool:
+    """这个作者目录属于非公众号线（知乎/小红书/微博/Twitter 等）。"""
+    try:
+        parts = book_dir.resolve().parts
+    except OSError:
+        parts = book_dir.parts
+    return any(p in _PLATFORM_DIRS for p in parts) and "01、微信公众号" not in parts
+
+
+def should_split_by_month(account: str, book_dir: Path) -> bool:
+    """这个作者要不要按月分册。
+
+    公众号：看点名清单（SPLIT_MONTH_ACCOUNTS），单独规则。
+    其它平台：篇数 ≥ PLATFORM_MONTH_SPLIT_MIN 才按月，否则一个作者一本。
+    """
+    if is_non_wechat_platform(book_dir):
+        n = len(list(source_dir(book_dir).glob("*.xhtml")))
+        return n >= PLATFORM_MONTH_SPLIT_MIN
+    return account in SPLIT_MONTH_ACCOUNTS
 
 
 def ensure_cover(book_dir: Path, account: str, span: str) -> Path | None:
