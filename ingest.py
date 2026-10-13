@@ -44,7 +44,16 @@ UNKNOWN_DIR = ROOT / "02、定稿库" / "_待判"
 
 import platforms as P                            # noqa: E402
 import link_index                                 # noqa: E402
+import progress                                   # noqa: E402
 import sigi_convert as S                         # noqa: E402
+
+# 本轮的进度对象。默认为空实现（避免各处都要判 None）。
+_PRG: "progress.Progress | None" = None
+
+
+def _pg(name: str, state: str, detail: str = "", target: str = "") -> None:
+    if _PRG is not None:
+        _PRG.set_state(name, state, detail, target)
 
 
 def safe_unzip(zpath: Path, dest: Path) -> list[Path]:
@@ -94,6 +103,7 @@ def is_wechat_html(path: Path) -> bool:
 
 def to_unknown(path: Path, reason: str, dry_run: bool) -> None:
     """判不出的文件挪到 `_待判/`，等人工处理（陈少 2026-10-13 定：不猜）。"""
+    _pg(path.name, "unknown", reason)
     print("  ⚠ 判不出平台/作者 → 待判目录（%s）" % reason)
     if dry_run:
         return
@@ -169,6 +179,7 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     #   标题级（`find_duplicate_title`）—— 没有链接的老快照靠它
     hit = link_index.find(info.get("url", ""))
     if hit:
+        _pg(info["path"].name, "dup", "链接已收录于 %s" % hit)
         print("  ⊘ 链接已收录，跳过并清理原件：%s → %s" % (info["path"].name, hit))
         if not dry_run:
             move_to_trash(info["path"])
@@ -176,6 +187,7 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
 
     dup = find_duplicate_title(info["title"])
     if dup:
+        _pg(info["path"].name, "dup", "标题重复于 %s" % dup)
         print("  ⊘ 已在库中，跳过并清理原件：%s → %s" % (info["path"].name, dup))
         if not dry_run:
             move_to_trash(info["path"])
@@ -187,6 +199,7 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     stem = "_".join(x for x in (info["date"], author, info["title"]) if x)
     out = dest_dir / (safe_stem(stem) + "-Sigil.xhtml")
     if out.exists():
+        _pg(info["path"].name, "dup", "目标已存在")
         print("  ⊘ 目标已存在，跳过：%s" % out.name)
         if not dry_run:
             move_to_trash(info["path"])
@@ -201,12 +214,14 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     shell, chars = is_empty_shell(out)
     if shell:
         out.unlink(missing_ok=True)
+        _pg(info["path"].name, "fail", "疑似空壳（正文仅 %d 字）" % chars)
         print("  ✗ 转换结果疑似空壳（正文仅 %d 字），原文保留：%s" % (chars, info["path"].name))
         return None
     # 登记链接 ID：原件马上要删，之后再想补索引就没来源了
     link_index.register(info.get("url", ""),
                         "%s/%s/%s" % (P.PLATFORMS[key], author, out.name))
     move_to_trash(info["path"])
+    _pg(info["path"].name, "ok", "", "%s/%s" % (P.PLATFORMS[key], author))
     print("  ✓ 归档：%s → %s/%s/" % (info["path"].name, P.PLATFORMS[key], author))
     return out
 
@@ -224,12 +239,15 @@ def handle_wechat(path: Path, dry_run: bool) -> Path | None:
     try:
         B._add_one(path, archive_original=True, dry_run=dry_run, touched=touched)
     except Exception as exc:              # 单篇炸了不能让整批停
+        _pg(path.name, "fail", "%s: %s" % (type(exc).__name__, str(exc)[:60]))
         print("  ✗ 微信转换异常：%s: %s" % (type(exc).__name__, str(exc)[:100]))
         return None
     if len(B.STATS["added"]) > before:
         account, fname = B.STATS["added"][-1].split(" / ", 1)
+        _pg(path.name, "ok", "", account)
         print("  ✓ 归档：%s → %s/xhtml/" % (path.name, account))
         return Path(fname)
+    _pg(path.name, "dup", "已存在或在库中")
     print("  ⊘ 未新增（已存在或在库中）：%s" % path.name)
     return None
 
@@ -288,10 +306,19 @@ def main() -> int:
     targets = collect_targets(args)
     started = dt.datetime.now()
     print("入料%s　共 %d 个文件" % ("（预演）" if args.dry_run else "", len(targets)))
+
+    # 进度落盘，供浏览器页面轮询（陈少 2026-10-13：要实时看到哪个处理过了）
+    global _PRG
+    _PRG = progress.Progress("投递箱处理", dry_run=args.dry_run)
+
     if not targets:
         print("投递箱里没有 html / zip。")
+        _PRG.finish("投递箱是空的")
         _write_run_log(started, 0, 0, 0, note="无待处理文件")
         return 0
+
+    # 先列出全部待处理（zip 里的要解开才知道，所以先列顶层文件）
+    _PRG.plan([t.name for t in targets])
 
     staged: list[Path] = []
     ok = skipped = unknown = 0
@@ -299,16 +326,16 @@ def main() -> int:
         if not t.exists():
             print("不存在，跳过：%s" % t)
             continue
+        _pg(t.name, "running")
         print("\n【%s】" % t.name)
         items: list[Path]
         if t.suffix.lower() == ".zip":
-            if args.dry_run:
-                # 预演也解到暂存区，才能报出里面是什么
-                items = safe_unzip(t, STAGING / t.stem)
-            else:
-                items = safe_unzip(t, STAGING / t.stem)
+            # 预演也解到暂存区，才能报出里面是什么
+            items = safe_unzip(t, STAGING / t.stem)
             staged.extend(items)
             print("  解出 %d 个 html" % len(items))
+            for sub in items:               # zip 内部文件也列进进度页
+                _pg(sub.name, "waiting", "来自 %s" % t.name)
         else:
             items = [t]
 
@@ -317,6 +344,7 @@ def main() -> int:
             if not is_notion_export(it):
                 if is_wechat_html(it):
                     print("  形态=微信直取 → 走微信链路")
+                    _pg(it.name, "running", "微信链路")
                     if handle_wechat(it, args.dry_run):
                         ok += 1
                     continue
@@ -325,6 +353,7 @@ def main() -> int:
                 to_unknown(it, "不是可识别的微信/Notion 文章", args.dry_run)
                 unknown += 1
                 continue
+            _pg(it.name, "running")
             info = probe(it)
             print("  来源=%-8s 链接域名=%-24s → %s（%s）"
                   % (info["source_label"] or "—", (info["url"] or "—")[:24],
@@ -343,6 +372,7 @@ def main() -> int:
     else:
         _write_run_log(started, ok, unknown, skipped,
                        note="手动" if args.files else "投递箱")
+    _PRG.finish("归档 %d，待判 %d，跳过 %d" % (ok, unknown, skipped))
     return 0
 
 

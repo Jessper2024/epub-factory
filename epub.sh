@@ -6,6 +6,7 @@
 #                         加 --dry-run 预演（只报告不落地）；--min-articles 10 改门槛
 #   ./epub.sh ingest      统一入料：微信直取 / Notion 导出（HTML / ZIP）→ 判平台 → 判作者 → 归档
 #   ./epub.sh ingest-auto 投递箱定时任务：install / status / run（每 4 小时扫一次）
+#   ./epub.sh progress    投递箱实时进度页（只监听 127.0.0.1:8770，自动开浏览器）
 #   ./epub.sh migrate-md  存量 md → xhtml（默认预演，--apply 执行）
 #   ./epub.sh allow 号名    放行一个新号（把搁置在 _待确认新号/ 的文件放回收件箱）
 #   ./epub.sh auto        定时任务：install / uninstall / status / run（默认每小时扫一次）
@@ -44,6 +45,7 @@ case "$cmd" in
   inbox) exec "$PY" "$ENGINE/build_epub.py" --inbox "$@" ;;
   ingest) exec "$PY" "$ENGINE/ingest.py" "$@" ;;      # 统一入料：微信/Notion HTML/ZIP → 平台/作者
   ingest-auto) exec "$ENGINE/ingest_auto.sh" "$@" ;;  # 投递箱定时任务：install/status/run（每 4 小时）
+  progress) exec "$PY" "$ENGINE/progress_server.py" "$@" ;;  # 实时进度页（只监听本机 8770）
   migrate-md) exec "$PY" "$ENGINE/migrate_md.py" "$@" ;;  # 存量 md → xhtml（预演；--apply 执行）
   allow) [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --allow "$@" ;;
   auto)  exec "$ENGINE/inbox_auto.sh" "$@" ;;
