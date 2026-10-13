@@ -56,6 +56,17 @@ PLATFORM_KEY = {
     "微博": "weibo",
     "小红书": "xiaohongshu",
 }
+# 链接域名 → 平台名（兜底：属性表抽不到「来源/类型」时靠它，图标/类型行永远有）
+DOMAIN_PLATFORM = (
+    ("mp.weixin.qq.com", "微信公众号"),
+    ("zhihu.com", "知乎"),
+    ("x.com", "Twitter"),
+    ("twitter.com", "Twitter"),
+    ("weibo.com", "微博"),
+    ("weibo.cn", "微博"),
+    ("xiaohongshu.com", "小红书"),
+    ("xhslink.com", "小红书"),
+)
 
 # 「其他 N 个属性」的 N —— Notion 属性表标配的折叠提示（照截图）
 OTHER_COUNT = 9
@@ -165,6 +176,15 @@ PROP_PILL = {
     "类型": "pill-purple",
     "平台": "pill-purple",
 }
+
+
+def platform_from_url(url: str) -> str:
+    """链接域名 → 平台名（认不出返回空）。"""
+    u = (url or "").strip().lower()
+    for domain, name in DOMAIN_PLATFORM:
+        if domain in u:
+            return name
+    return ""
 
 
 def platform_icon_data_uri(platform_name: str) -> str:
@@ -332,8 +352,7 @@ def _cdp_print(ws_url: str, port: int) -> str:
             "params": {
                 "printBackground": True,
                 "paperWidth": 8.27, "paperHeight": 11.69,      # A4 inches
-                "marginTop": 0.71, "marginBottom": 0.71,
-                "marginLeft": 0.63, "marginRight": 0.63,
+                "preferCSSPageSize": True,     # 边距交给 CSS @page（英寸边距会和 CSS 打架，右侧溢出——踩过）
                 "displayHeaderFooter": True,
                 "headerTemplate": "<div></div>",
                 "footerTemplate": FOOTER_TMPL,
@@ -386,12 +405,19 @@ def convert_one(src: Path, out_pdf: Path) -> bool:
     if "notion-body" not in (doc.get("class") or "") and not doc.xpath('//*[@id="notion-app"]'):
         log("⚠ 不是 Notion 网页快照，已在处理范围之外：", src.name[:50])
     info = extract(doc)
-    # 平台名从属性表「来源」或「类型」取（陈少 2026-10-13）
+    # 平台名三级兜底：来源 → 类型 → 链接域名（陈少 2026-10-13：图标/类型行永远要有）
     platform = ""
     for k, v in info["props"]:
-        if k in ("来源", "类型", "平台") and v:
+        if k in ("来源", "类型", "平台") and v and v not in ("空白", "正在思考"):
             platform = v
             break
+    if not platform:
+        # URL 从属性表第一项（URL/文章链接/链接）取
+        url = next((v for k, v in info["props"] if k in ("URL", "文章链接", "链接")), "")
+        platform = platform_from_url(url)
+    # 属性表补「类型」行：抽不到就用平台判定结果（保持 4 行齐）
+    if platform and not any(k == "类型" for k, _ in info["props"]):
+        info["props"].insert(1, ("类型", platform))
     log("标题：%s" % (info["title"][:40] or "（无）"))
     log("属性 %d 行 · 正文块 %d 个（图 %d 张）"
         % (len(info["props"]), len(info["blocks"]),
