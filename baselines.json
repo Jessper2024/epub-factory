@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-13T14:37:48",
-    "git": "5d20127",
-    "books": 44
+    "updated_at": "2026-10-13T14:44:10",
+    "git": "9966b46",
+    "books": 42
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -54,17 +54,17 @@
   },
   "回笼教Dreamer_202610.epub": {
     "size_mb": 0.1,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 2,
+    "toc": 1,
     "parts": 1,
     "source_xhtml": 1
   },
   "大厂日爆_202511.epub": {
     "size_mb": 0.0,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 14,
+    "toc": 13,
     "parts": 1,
     "source_xhtml": 1
   },
@@ -78,35 +78,27 @@
   },
   "币须知_202609.epub": {
     "size_mb": 0.1,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 2,
+    "toc": 1,
     "parts": 1,
     "source_xhtml": 1
   },
   "新华社_202609.epub": {
     "size_mb": 0.1,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 2,
+    "toc": 1,
     "parts": 1,
     "source_xhtml": 1
   },
   "新华网_202609.epub": {
     "size_mb": 1.4,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 160,
+    "toc": 159,
     "parts": 1,
     "source_xhtml": 1
-  },
-  "晚点LatePost_201909-202608.epub": {
-    "size_mb": 35.4,
-    "months": 16,
-    "articles": 38,
-    "toc": 119,
-    "parts": 16,
-    "source_xhtml": 39
   },
   "晚点LatePost_201909-202609.epub": {
     "size_mb": 35.5,
@@ -150,17 +142,17 @@
   },
   "没有答案_202608.epub": {
     "size_mb": 0.0,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 2,
+    "toc": 1,
     "parts": 1,
     "source_xhtml": 1
   },
   "深网腾讯新闻_202609.epub": {
     "size_mb": 0.6,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 5,
+    "toc": 4,
     "parts": 1,
     "source_xhtml": 1
   },
@@ -204,19 +196,11 @@
     "parts": 2,
     "source_xhtml": 2
   },
-  "王阿三_202309-202512.epub": {
-    "size_mb": 1.3,
-    "months": 2,
-    "articles": 2,
-    "toc": 23,
-    "parts": 2,
-    "source_xhtml": 2
-  },
   "硅facts_202609.epub": {
     "size_mb": 0.0,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 4,
+    "toc": 3,
     "parts": 1,
     "source_xhtml": 1
   },
@@ -230,25 +214,25 @@
   },
   "花卷妈_202511.epub": {
     "size_mb": 0.2,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 8,
+    "toc": 7,
     "parts": 1,
     "source_xhtml": 1
   },
   "这很知乎_202609.epub": {
     "size_mb": 2.4,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 4,
+    "toc": 3,
     "parts": 1,
     "source_xhtml": 1
   },
   "酷我音乐_202301.epub": {
     "size_mb": 0.5,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 12,
+    "toc": 11,
     "parts": 1,
     "source_xhtml": 1
   },
@@ -270,9 +254,9 @@
   },
   "骑手生态圈_202609.epub": {
     "size_mb": 0.2,
-    "months": 1,
+    "months": 0,
     "articles": 1,
-    "toc": 2,
+    "toc": 1,
     "parts": 1,
     "source_xhtml": 1
   },
@@ -286,9 +270,9 @@
   },
   "高性价比人生指南_合集.epub": {
     "size_mb": 0.6,
-    "months": 1,
+    "months": 0,
     "articles": 33,
-    "toc": 545,
+    "toc": 544,
     "parts": 1,
     "source_xhtml": 33
   },

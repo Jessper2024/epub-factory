@@ -889,9 +889,11 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     modified = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cover_id = ""
     if should_split_by_month(account, book_dir):
-        cover_bytes = make_cover_bytes(account, span)   # 米白底+屏显臻宋+大月份
+        cover_bytes = make_cover_bytes(account, span)   # 主视觉 = 月份
     else:
-        cover = ensure_cover(book_dir, account, span)
+        # 非分册号（一个作者一本）：主视觉 = 篇数（陈少 2026-10-13 定）
+        hero = "%d 篇" % len(arts)
+        cover = ensure_cover(book_dir, account, hero, force=COVER_REGEN)
         cover_bytes = cover.read_bytes() if (cover and cover.exists()) else None
 
     items: list[tuple[str, str, str]] = [
@@ -1481,6 +1483,11 @@ SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀"}
 # 公众号是单独规则（看上方的 SPLIT_MONTH_ACCOUNTS），不适用这个门槛。
 PLATFORM_MONTH_SPLIT_MIN = 100
 
+# 封面换版开关（陈少 2026-10-13：视觉统一成格隆汇那套）。
+# 平时 False —— 封面已生成就复用，方便手工换图；
+# 换版/改模板时临时置 True 跑一轮，全库重生成后再置回。
+COVER_REGEN = False
+
 
 def is_non_wechat_platform(book_dir: Path) -> bool:
     """这个作者目录属于非公众号线（知乎/小红书/微博/Twitter 等）。"""
@@ -1503,102 +1510,101 @@ def should_split_by_month(account: str, book_dir: Path) -> bool:
     return account in SPLIT_MONTH_ACCOUNTS
 
 
-def ensure_cover(book_dir: Path, account: str, span: str) -> Path | None:
-    """号文件夹里没有封面时生成一张；已有就原样复用（方便自己换图）。"""
-    cover = book_dir / COVER_NAME
-    if cover.exists():
-        return cover
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except ImportError:
-        log("  未装 Pillow，跳过封面生成")
-        return None
-
-    def font(size: int):
-        for path in COVER_FONTS:
-            if os.path.exists(path):
-                try:
-                    return ImageFont.truetype(path, size)
-                except Exception:
-                    continue
-        return ImageFont.load_default()
-
-    W, H = 1200, 1600
-    img = Image.new("RGB", (W, H), "#1f2a37")
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([0, H - 300, W, H], fill="#18222e")
-
-    def center(text: str, f, y: int, fill: str):
-        box = draw.textbbox((0, 0), text, font=f)
-        draw.text(((W - (box[2] - box[0])) / 2 - box[0], y), text, font=f, fill=fill)
-
-    name_font = font(150 if len(account) <= 4 else 110)
-    center(account, name_font, 600, "#f4f6f8")
-    draw.line([(W / 2 - 90, 800), (W / 2 + 90, 800)], fill="#5b7285", width=3)
-    if span:
-        center(span, font(46), 850, "#9fb3c4")
-    center("沪上陈少 藏", font(40), H - 190, "#7f95a8")
-
-    img.save(cover, "JPEG", quality=88)
-    log("  生成封面：", cover.name)
-    return cover
-
-
-def make_cover_bytes(account: str, span: str) -> bytes | None:
-    """分册号封面：米白底 + 屏显臻宋 + 大字号月份居中 + 深色字（陈少 2026-10-11 定）。
-
-    span 即月份标签（如「2026年9月」），作为封面主视觉；号名中号置于上方，
-    落款「沪上陈少 藏」小字在底部。返回 JPEG bytes，直接嵌进当月那本 EPUB，
-    不落盘到号目录（每月封面不同，号目录一个 cover.jpg 不够用）。
-    """
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except ImportError:
-        log("  未装 Pillow，跳过封面生成")
-        return None
-    font_path = COVER_FONT_PATH if os.path.exists(COVER_FONT_PATH) else None
-
-    def font(size: int):
-        if font_path:
+def _cover_font(size: int):
+    """封面统一用屏显臻宋（陈少 2026-10-11 定）；找不到退回系统宋体。"""
+    from PIL import ImageFont
+    if os.path.exists(COVER_FONT_PATH):
+        try:
+            return ImageFont.truetype(COVER_FONT_PATH, size)
+        except Exception:
+            pass
+    for p in COVER_FONTS:
+        if os.path.exists(p):
             try:
-                return ImageFont.truetype(font_path, size)
+                return ImageFont.truetype(p, size)
             except Exception:
-                pass
-        for p in COVER_FONTS:
-            if os.path.exists(p):
-                try:
-                    return ImageFont.truetype(p, size)
-                except Exception:
-                    continue
-        return ImageFont.load_default()
+                continue
+    return ImageFont.load_default()
+
+
+def render_cover(account: str, hero: str) -> bytes:
+    """统一封面模板：米白底 + 屏显臻宋 + 大字号主视觉 + 落款（陈少 2026-10-13 定）。
+
+    分册号与非分册号**共用这一套视觉语言**，只是主视觉（hero）不同：
+      分册号   hero = 月份（如「2026年9月」）—— 每月一本，月份才区分得开
+      非分册号 hero = 篇数（如「39 篇」）—— 一个作者一本，篇数说明内容多少
+
+    为什么非分册号的主视觉用篇数而不是号名：
+      号名放到 176px 会太长（英文名如 HugoBossTang 要缩到 88% 宽度才塞得下，
+      反而不好看）；篇数是数字，同字号视觉最稳。号名放中号在上方，身份依然清楚。
+    """
+    from PIL import Image, ImageDraw
+    import io
 
     W, H = 1200, 1600
-    BG, INK, SUB = "#f7f5f0", "#1a1a1a", "#6b6357"   # 米白底 / 深色字 / 落款灰
+    BG, INK, SUB, LINE = "#f7f5f0", "#1a1a1a", "#6b6357", "#c9c2b5"
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
     def center(text: str, f, top: int, fill: str = INK):
         box = draw.textbbox((0, 0), text, font=f)
-        w = box[2] - box[0]
-        draw.text(((W - w) / 2 - box[0], top - box[1]), text, font=f, fill=fill)
+        draw.text(((W - (box[2] - box[0])) / 2 - box[0], top - box[1]),
+                  text, font=f, fill=fill)
 
-    center(account, font(96), 430, INK)                        # 号名（中号，上部）
-    draw.line([(W / 2 - 130, 580), (W / 2 + 130, 580)], fill="#c9c2b5", width=2)
-    if span:                                                   # 大字号月份（主视觉，自适应不溢出）
-        msize = 176
-        mf = font(msize)
-        mbox = draw.textbbox((0, 0), span, font=mf)
-        mw = mbox[2] - mbox[0]
-        if mw > W * 0.88:
-            msize = int(msize * W * 0.88 / mw)
-            mf = font(msize)
-        center(span, mf, 760, INK)
-    center("沪上陈少 藏", font(44), H - 170, SUB)               # 落款
-    import io
+    # 号名（中号，上部）。太长自动缩，别顶到边
+    nsize = 96
+    while nsize > 40:
+        box = draw.textbbox((0, 0), account, font=_cover_font(nsize))
+        if (box[2] - box[0]) <= W * 0.84:
+            break
+        nsize -= 6
+    center(account, _cover_font(nsize), 430, INK)
+
+    draw.line([(W / 2 - 130, 580), (W / 2 + 130, 580)], fill=LINE, width=2)
+
+    if hero:
+        hsize = 176
+        box = draw.textbbox((0, 0), hero, font=_cover_font(hsize))
+        hw = box[2] - box[0]
+        if hw > W * 0.88:                       # 自适应不溢出
+            hsize = int(hsize * W * 0.88 / hw)
+        center(hero, _cover_font(hsize), 760, INK)
+
+    center("沪上陈少 藏", _cover_font(44), H - 170, SUB)
+
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=90)
-    log("  生成封面（米白+屏显臻宋）：", account, span)
     return buf.getvalue()
+
+
+def ensure_cover(book_dir: Path, account: str, hero: str,
+                 force: bool = False) -> Path | None:
+    """号文件夹的 cover.jpg。有就复用（方便自己换图）；force=True 无条件重生成。"""
+    cover = book_dir / COVER_NAME
+    if cover.exists() and not force:
+        return cover
+    try:
+        data = render_cover(account, hero)
+    except ImportError:
+        log("  未装 Pillow，跳过封面生成")
+        return None
+    cover.write_bytes(data)
+    log("  生成封面（米白+屏显臻宋）：", cover.name, hero)
+    return cover
+
+
+def make_cover_bytes(account: str, span: str) -> bytes | None:
+    """分册号封面（内存生成、不落盘）：主视觉 = 月份。
+
+    每月封面不同，号目录一个 cover.jpg 不够用，所以直接返回 bytes 嵌进当月那本。
+    """
+    try:
+        data = render_cover(account, span)
+    except ImportError:
+        log("  未装 Pillow，跳过封面生成")
+        return None
+    log("  生成封面（米白+屏显臻宋）：", account, span)
+    return data
 
 
 def tidy_sources(book_dir: Path) -> int:
