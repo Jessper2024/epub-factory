@@ -74,7 +74,7 @@ SIGI_DIR = ENGINE_DIR                                 # sigi_convert.py 与本�
 #   <号名>/<号名>_YYYYMM[-YYYYMM].epub
 XHTML_SUBDIR = "xhtml"
 COVER_NAME = "cover.jpg"
-RAW_SUBDIR = "原始HTML"          # 转换后的原 HTML 备份到这里
+RAW_SUBDIR = "html"              # 转换后的原 HTML 留底到这里（陈少 2026-10-14：跟 Notion 线统一目录名）
 INBOX_DIR = ROOT / "_待处理"      # 待处理 HTML 的收件箱（下划线开头，扫号目录时自动跳过）
 
 SKIP_DIRS = {"EPUB成品", ".workbuddy", "微信公众号下载"}  # 源文件夹不当作号目录
@@ -1397,7 +1397,7 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
             # 以后同一篇重放会被当成新文章收第二遍。
             register_fingerprints(p, "%s/%s" % (dest_dir.name, dest.name))
             register_biz(p, account)
-            if archive_original and _cfg_bool("keep_raw_html", False):
+            if archive_original and _cfg_bool("keep_raw_html", True):   # 陈少 2026-10-14：所有 html 都留底
                 raw_dir = dest_dir / RAW_SUBDIR
                 raw_dir.mkdir(parents=True, exist_ok=True)
                 raw_dest = raw_dir / p.name

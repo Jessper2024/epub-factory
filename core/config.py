@@ -87,7 +87,7 @@ DEFAULTS: dict = {
     "auto_allow_new_accounts": True,
     # 转成 xhtml 后原 html 就没用了（xhtml 才是不可再生资产），默认删掉，
     # 不再往 <号>/原始HTML/ 堆一份。改 True 可恢复旧行为（保留原件）。
-    "keep_raw_html": False,
+    "keep_raw_html": True,   # 陈少 2026-10-14：所有 html 都留底（微信+Notion 统一存 html/）
 
     # —— 运行 ——
     "cloud_interval": 14400,          # 云端看板发布间隔（秒）= 4 小时

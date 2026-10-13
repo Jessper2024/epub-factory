@@ -262,6 +262,10 @@ def handle_wechat(path: Path, dry_run: bool) -> Path | None:
         return None
     if len(B.STATS["added"]) > before:
         account, fname = B.STATS["added"][-1].split(" / ", 1)
+        # 记录到重建集合（陈少 2026-10-14：微信链路入料后也要自动重建 epub）。
+        # 微信文章走 4 段式文件名（日期_号_作者_标题），号名即 account 第 1 段；
+        # 但 TOUCHED_ACCOUNTS 存的是 (平台key, 作者)，作者要从文件名取。
+        TOUCHED_ACCOUNTS.add(("wechat", account))
         _pg(path.name, "ok", "", account)
         print("  ✓ 归档：%s → %s/xhtml/" % (path.name, account))
         return Path(fname)
