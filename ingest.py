@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""统一入料入口：Notion 导出（HTML / ZIP）→ 判平台 → 判作者 → 归档 → 出书。
+"""统一入料入口：**三种入料一个口**（陈少 2026-10-13 定）。
 
     ./epub.sh ingest                    扫投递箱（01、投递箱/）里的 html 与 zip
     ./epub.sh ingest <文件...>          处理指定文件
     ./epub.sh ingest --dry-run          只预演，一个文件都不落地
 
-陈少 2026-10-13 定：后续入料有三种
-    1. 微信官网直取的 HTML        —— 走原收文流程（build_epub --inbox）
-    2. Notion 导出的 HTML（最多）  —— 本入口
-    3. Notion 导出异常的 ZIP       —— 本入口（解开后跟 2 同构）
+三种入料
+    1. 微信官网直取的 HTML        —— 走微信链路（build_epub 那套，含 biz 归号）
+    2. Notion 导出的 HTML（最多）  —— 平台判定 → 作者 → 归档
+    3. Notion 导出异常的 ZIP       —— 解开后与第 2 种同构
 
 三种最终都产出**同一种** XHTML，落到 `02、定稿库/<平台>/<作者>/xhtml/`。
+微信并不单独一条路——本入口自己认形态，用户永远只跑一条命令。
+
+判不出的处理（陈少 2026-10-13 定）：
+    没「来源」字段就用原文链接判；两个都没有 → 落到
+    `02、定稿库/_待判/`，在报告里列出来提醒人工处理（**不猜**）。
+
 ZIP 里的中文文件名要用 cp437→utf-8 还原：Notion 打包时的编码，
 shell 的 unzip 会报 "Illegal byte sequence"。
 """
@@ -32,6 +38,8 @@ ROOT = ENGINE.parent
 INBOX = ROOT / "01、投递箱"                     # 日常入料：丢这里
 STAGING_ROOT = ROOT / "_待处理"                 # 收件箱（含历史遗留的 zip）
 STAGING = STAGING_ROOT / "ingest"               # zip 解包暂存（下划线开头，不参与扫描）
+# 判不出平台/作者的落这儿，等人工看一眼。下划线开头 → 不参与成书扫描。
+UNKNOWN_DIR = ROOT / "02、定稿库" / "_待判"
 
 import platforms as P                            # noqa: E402
 import sigi_convert as S                         # noqa: E402
@@ -71,6 +79,30 @@ def is_notion_export(path: Path) -> bool:
     except OSError:
         return False
     return "notion-page-content" in text or 'class="page-body"' in text or "page-body" in text
+
+
+def is_wechat_html(path: Path) -> bool:
+    """是不是微信官网直取的文章。判定规则复用 build_epub，不重写一份。"""
+    try:
+        import build_epub as B
+        return B.looks_like_wechat(path)
+    except Exception:
+        return False
+
+
+def to_unknown(path: Path, reason: str, dry_run: bool) -> None:
+    """判不出的文件挪到 `_待判/`，等人工处理（陈少 2026-10-13 定：不猜）。"""
+    print("  ⚠ 判不出平台/作者 → 待判目录（%s）" % reason)
+    if dry_run:
+        return
+    UNKNOWN_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UNKNOWN_DIR / path.name
+    n = 1
+    while dest.exists():                        # 同名不覆盖，加序号
+        dest = UNKNOWN_DIR / ("%s_%d%s" % (path.stem, n, path.suffix))
+        n += 1
+    shutil.move(str(path), str(dest))
+    print("     → %s" % dest.name)
 
 
 def clean_title(title: str) -> str:
@@ -116,15 +148,16 @@ def probe(path: Path) -> dict:
 
 
 def archive(info: dict, dry_run: bool = False) -> Path | None:
-    """归档一篇：转 XHTML → 落到 平台/作者/xhtml/。返回产出路径。"""
+    """归档一篇 Notion 导出：转 XHTML → 落到 平台/作者/xhtml/。返回产出路径。
+
+    判不出平台或作者 → 交给 to_unknown 落待判目录（陈少 2026-10-13 定：不猜）。
+    """
     from build_epub import safe_stem, find_duplicate_title, move_to_trash
 
     key, author = info["platform"], info["author"]
-    if not key:
-        print("  ✗ 认不出平台，跳过：%s（%s）" % (info["path"].name, info["platform_reason"]))
-        return None
-    if not author:
-        print("  ✗ 认不出作者，跳过：%s" % info["path"].name)
+    if not key or not author:
+        reason = info["platform_reason"] if not key else "属性表没有「作者」字段"
+        to_unknown(info["path"], reason, dry_run)
         return None
 
     # 先判重再建目录：book_dir() 会创建目录，若判重挡下就会留下空壳目录
@@ -162,6 +195,29 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     return out
 
 
+def handle_wechat(path: Path, dry_run: bool) -> Path | None:
+    """微信直取的 HTML：交给 build_epub 那条成熟链路（含 biz 归号、推广图清理）。
+
+    在这里**不重写一套**——微信的号名识别（js_name + biz 映射）、推广图黑名单、
+    空壳保护、判重废纸篓都在那边，重复实现必然分叉。本函数只做"转发"。
+    """
+    import build_epub as B
+
+    before = len(B.STATS["added"])
+    touched: dict = {}
+    try:
+        B._add_one(path, archive_original=True, dry_run=dry_run, touched=touched)
+    except Exception as exc:              # 单篇炸了不能让整批停
+        print("  ✗ 微信转换异常：%s: %s" % (type(exc).__name__, str(exc)[:100]))
+        return None
+    if len(B.STATS["added"]) > before:
+        account, fname = B.STATS["added"][-1].split(" / ", 1)
+        print("  ✓ 归档：%s → %s/xhtml/" % (path.name, account))
+        return Path(fname)
+    print("  ⊘ 未新增（已存在或在库中）：%s" % path.name)
+    return None
+
+
 def collect_targets(args) -> list[Path]:
     """要处理的文件清单：显式给的，或投递箱 + 收件箱里扫出来的。
 
@@ -196,7 +252,7 @@ def main() -> int:
         return 0
 
     staged: list[Path] = []
-    ok = skipped = 0
+    ok = skipped = unknown = 0
     for t in targets:
         if not t.exists():
             print("不存在，跳过：%s" % t)
@@ -215,9 +271,17 @@ def main() -> int:
             items = [t]
 
         for it in items:
+            # 形态分流：微信直取 / Notion 导出 / 都不像
             if not is_notion_export(it):
-                print("  ⊘ 不是 Notion 导出（可能是微信直取），交给收文流程：%s" % it.name)
-                skipped += 1
+                if is_wechat_html(it):
+                    print("  形态=微信直取 → 走微信链路")
+                    if handle_wechat(it, args.dry_run):
+                        ok += 1
+                    continue
+                # 既不是 Notion 也不是微信 → 交给人工
+                print("  形态=认不出（既不是 Notion 导出，也不像微信文章）")
+                to_unknown(it, "不是可识别的微信/Notion 文章", args.dry_run)
+                unknown += 1
                 continue
             info = probe(it)
             print("  来源=%-8s 链接域名=%-24s → %s（%s）"
@@ -226,8 +290,12 @@ def main() -> int:
             print("  作者=%-12s 标题=%s" % (info["author"] or "（认不出）", info["title"][:40]))
             if archive(info, args.dry_run):
                 ok += 1
+            elif not info["platform"] or not info["author"]:
+                unknown += 1
 
-    print("\n合计：归档 %d，非 Notion 跳过 %d" % (ok, skipped))
+    print("\n合计：归档 %d，待判 %d，跳过 %d" % (ok, unknown, skipped))
+    if unknown:
+        print("  ⚠ 有 %d 个落进待判目录，需要人工看一眼：%s" % (unknown, UNKNOWN_DIR))
     if args.dry_run:
         print("（预演，未落地。确认后去掉 --dry-run 执行）")
     return 0

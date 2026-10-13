@@ -4,8 +4,8 @@
 #   ./epub.sh only 猫笔刀   只重建某一本
 #   ./epub.sh inbox       扫描收件箱 _待处理/ 并分流重建
 #                         加 --dry-run 预演（只报告不落地）；--min-articles 10 改门槛
-#   ./epub.sh ingest      统一入料：Notion 导出（HTML / ZIP）→ 判平台 → 判作者 → 归档
-#                         三种入料：微信直取走 inbox；Notion HTML/ZIP 走这里
+#   ./epub.sh ingest      统一入料：微信直取 / Notion 导出（HTML / ZIP）→ 判平台 → 判作者 → 归档
+#   ./epub.sh ingest-auto 投递箱定时任务：install / status / run（每 4 小时扫一次）
 #   ./epub.sh migrate-md  存量 md → xhtml（默认预演，--apply 执行）
 #   ./epub.sh allow 号名    放行一个新号（把搁置在 _待确认新号/ 的文件放回收件箱）
 #   ./epub.sh auto        定时任务：install / uninstall / status / run（默认每小时扫一次）
@@ -42,7 +42,8 @@ case "$cmd" in
   all)   exec "$PY" "$ENGINE/build_epub.py" "$@" ;;
   only)  [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --only "$@" ;;
   inbox) exec "$PY" "$ENGINE/build_epub.py" --inbox "$@" ;;
-  ingest) exec "$PY" "$ENGINE/ingest.py" "$@" ;;      # 统一入料：Notion HTML/ZIP → 平台/作者
+  ingest) exec "$PY" "$ENGINE/ingest.py" "$@" ;;      # 统一入料：微信/Notion HTML/ZIP → 平台/作者
+  ingest-auto) exec "$ENGINE/ingest_auto.sh" "$@" ;;  # 投递箱定时任务：install/status/run（每 4 小时）
   migrate-md) exec "$PY" "$ENGINE/migrate_md.py" "$@" ;;  # 存量 md → xhtml（预演；--apply 执行）
   allow) [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --allow "$@" ;;
   auto)  exec "$ENGINE/inbox_auto.sh" "$@" ;;
