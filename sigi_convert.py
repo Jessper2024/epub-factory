@@ -18,6 +18,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from lxml import etree, html
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import emoji_tag  # noqa: E402
+
 
 DOCTYPE = '<!DOCTYPE html>'
 ALLOWED_ATTRIBUTES = {
@@ -202,7 +205,7 @@ pre { white-space: pre-wrap; }
 table { border-collapse: collapse; max-width: 100%; }
 img { max-width: 100%; height: auto; }
 a { color: inherit; }
-"""
+""" + "\n" + emoji_tag.EMOJI_CSS_RULE
 
 
 def safe_url(name: str, value: str) -> bool:
@@ -475,12 +478,23 @@ def _date_text_from_source(source) -> str:
 
 
 NOTION_TITLE_SUFFIX_RE = re.compile(r"(?:\s*[_|｜＿]\s*Notion)+\s*$", re.I)
+# 标题里带平台前缀/后缀（「知乎 - 去泰国…」「阿里白兔姐 - 小红书」）。
+# 平台已经体现在目录层级里了，不该出现在书名/正文标题里（2026-10-13 陈少要求）。
+_PLATFORM_NAME = r"(?:知乎|小红书|微博|Twitter|推特|Notion|微信公众号|B站|油管)"
+PLATFORM_PREFIX_RE = re.compile(r"^\s*%s\s*[-_|｜]\s*" % _PLATFORM_NAME, re.I)
+PLATFORM_SUFFIX_RE_2 = re.compile(r"\s*[-_|｜]\s*%s\s*$" % _PLATFORM_NAME, re.I)
 
 
 def _clean_title(value: str) -> str:
-    """Remove trailing Notion branding, without changing mentions in a title."""
+    """去掉标题里的平台名与 Notion 后缀，但不改动标题正文里的提及。"""
 
-    return NOTION_TITLE_SUFFIX_RE.sub("", _normalise_text(value).strip()).strip()
+    out = NOTION_TITLE_SUFFIX_RE.sub("", _normalise_text(value).strip()).strip()
+    for _ in range(3):
+        new = PLATFORM_SUFFIX_RE_2.sub("", PLATFORM_PREFIX_RE.sub("", out)).strip()
+        if new == out:
+            break
+        out = new
+    return out.strip("_-— ").strip()
 
 
 def _raw_title_from_source(source: etree._Element) -> str:
@@ -522,11 +536,19 @@ def _clean_article_title_headings(article: etree._Element, base_title: str) -> N
                 break
 
 
-def _article_title_from_source(source: etree._Element) -> str:
-    """Build the Sigil title as ``YYYY年M月D日_原标题`` when available."""
+def _article_title_from_source(source: etree._Element, process_type: str = "wechat") -> str:
+    """Build the Sigil title as ``YYYY年M月D日_原标题`` when available.
+
+    两种来源的日期出处不同：微信读 ``publish_time`` / JS 时间戳，
+    Notion 读属性表的「发布时间」。所以这里必须知道是哪一种，
+    否则 Notion 文件会产出缺日期的文件名（2026-10-13 踩过）。
+    """
 
     base_title = _base_title_from_source(source)
-    date_text = _date_text_from_source(source)
+    if process_type == "notion":
+        date_text = _notion_date(_notion_property(source, "发布时间"))
+    else:
+        date_text = _date_text_from_source(source)
     if date_text and not base_title.startswith(f"{date_text}_"):
         return f"{date_text}_{base_title}"
     return base_title
@@ -554,8 +576,65 @@ def _account_name_from_source(source: etree._Element) -> str:
     return _first_text_by_id(source, "js_name")
 
 
+# 微信文章的 biz（公众号唯一 ID）。Notion 导出的「文章链接」属性里带着它，
+# 号名能改、biz 不能，所以它是比号名更硬的归属依据。
+_NOTION_BIZ_RE = re.compile(r"[?&]__biz=([A-Za-z0-9=+/]+)")
+
+
+def notion_source_url(source: etree._Element) -> str:
+    """Notion 导出里的原文链接：优先属性表，其次正文里的「原文链接」行。"""
+
+    value = _notion_property(source, "文章链接")
+    if value:
+        return value.strip()
+    for node in source.xpath('//a[contains(@href, "mp.weixin.qq.com")]/@href'):
+        return node.strip()
+    return ""
+
+
+def notion_biz(source: etree._Element) -> str:
+    """从 Notion 的原文链接里取 biz（拿不到返回空，不猜）。"""
+
+    match = _NOTION_BIZ_RE.search(notion_source_url(source))
+    return match.group(1) if match else ""
+
+
+def _notion_account_name(source: etree._Element) -> str:
+    """Notion 导出的号名（= 目录名）。
+
+    属性表里没有号名字段，但有「文章链接」里的 biz。用 biz 反查
+    `_号biz映射.json`（各号归档时自动累积）拿到目录名——这样两种来源
+    能落进同一个号目录，而不是把同一本书拆成两本。
+    查不到就空着，交给上层回退（**不拿作者名冒充号名**，那会建出错误的目录）。
+    """
+
+    biz = notion_biz(source)
+    if not biz:
+        return ""
+    try:
+        # 延迟导入：core 反向依赖业务脚本是禁止的，这里只读业务产出的映射表
+        import build_epub
+        return build_epub.load_biz_map().get(biz, "")
+    except Exception:
+        return ""
+
+
 NOTION_PROPERTY_ALIASES = {
     "作者": {"作者", "作者名", "author", "作者（author）", "created by", "创建者"},
+    # 「来源」和「类型」是两个不同的字段名，但含义都是"这篇文章从哪来"：
+    #   SingleFile 存的网页快照 → 「来源」= 微信
+    #   Notion 官方 Export     → 「类型」= 微信 / 知乎 / B站…
+    "来源": {"来源", "来源（source）", "source", "出处", "平台", "类型", "type"},
+    "文章链接": {
+        "文章链接",
+        "原文链接",
+        "文章url",
+        "链接",
+        "url",
+        "原文地址",
+        "source url",
+        "link",
+    },
     "发布时间": {
         "发布时间",
         "发布日期",
@@ -587,6 +666,9 @@ def _notion_property(source: etree._Element, label: str) -> str:
     # A few exports retain a table but drop ARIA roles from the rows.  Restrict
     # this fallback to table descendants so ordinary article text is ignored.
     rows += source.xpath('//*[@role="table"]//tr | //*[@role="table"]/*[self::div or self::li]')
+    # Notion 官方 Export 的属性表是最朴素的 <table class="properties"><tr><th>名</th><td>值</td>，
+    # 没有任何 ARIA role，上面的选择器一个都命中不了（2026-10-13 实测）。
+    rows += source.xpath('//table[contains(@class, "properties")]//tr')
     seen: set[int] = set()
     for row in rows:
         marker = id(row)
@@ -595,10 +677,19 @@ def _notion_property(source: etree._Element, label: str) -> str:
         seen.add(marker)
         cells = row.xpath('.//*[@role="cell"]')
         if len(cells) < 2:
-            cells = row.xpath('./*[self::td or self::th or self::div]')
+            # th/td 是 Notion 官方导出的形态；div/li 是网页快照的形态
+            cells = row.xpath('./*[self::td or self::th or self::div or self::li]')
         values = [_text_value(cell) for cell in cells if _text_value(cell)]
         if len(values) >= 2 and _normalise_notion_label(values[0]) in wanted:
-            return values[1]
+            value = values[1]
+            # 链接类属性常常渲染成 <a href="...">短文字</a>，
+            # 直接取文本会拿到"短文字"而不是真地址（2026-10-13 实测拿到一个 "x"）。
+            # 地址在 href 里，优先取它。
+            if value and not re.search(r"https?://", value):
+                hrefs = cells[1].xpath(".//a/@href")
+                if hrefs and "http" in hrefs[0]:
+                    value = hrefs[0]
+            return value
     return ""
 
 
@@ -973,7 +1064,10 @@ def _filename_title_from_source(source: etree._Element, process_type: str = "wec
         return "_".join(parts)
     if process_type == "notion":
         date_text = _notion_date(_notion_property(source, "发布时间"))
-        account = ""
+        # 号名必须补上，否则文件名少了这一段，跟微信来源产出的不在一个命名空间里。
+        # 优先 biz 反查（最可靠），查不到再退回属性表「作者」——
+        # 注意「作者」是可见作者名（如"老陈"，跟公众号名差一字），只当兜底。
+        account = _notion_account_name(source) or _notion_property(source, "作者")
         author = _notion_property(source, "作者")
     else:
         date_text = _date_text_from_source(source)
@@ -1023,6 +1117,11 @@ def _select_article(source: etree._Element, process_type: str = "wechat") -> etr
         )
         if page_content:
             return page_content[0]
+        # Notion 官方 Export 用的是另一套 class：<div class="page-body">。
+        # 取它而不是 <article class="page">——后者会把 <header> 里的属性表一起带进来。
+        page_body = source.xpath('//div[contains(@class, "page-body")]')
+        if page_body:
+            return page_body[0]
 
     matches = source.xpath('//*[@id="js_content"]')
     if matches:
@@ -1046,6 +1145,56 @@ def _select_article(source: etree._Element, process_type: str = "wechat") -> etr
         if candidates:
             return candidates[0]
     raise ValueError("未找到可转换的正文区域。")
+
+
+# Notion 副本里正文开头的搬运痕迹：「💡」独占一行 + 跟着一行「原文链接: https://...」。
+# 微信直取的版本没有这两块，留着会让两种来源的成品肉眼可辨（2026-10-13 实测差异就这两处）。
+NOTION_SOURCE_LINE_RE = re.compile(r"^\s*(?:原文链接|文章链接|链接|原文地址)\s*[:：]", re.I)
+NOTION_BULB_RE = re.compile(r"^[\s\uFE0F\u200D]*💡[\s\uFE0F\u200D]*$")
+
+
+def _strip_notion_source_line(blocks: list) -> list:
+    """删掉正文开头的「💡 / 原文链接: ...」——它们已经进了属性表，不属于正文。
+
+    扫描窗口放宽到前 12 块：`_normalise_article` 会把属性表的每一行拆成
+    独立的块插在正文前面（一张 4 行的表就能推后好几个位置），窗口太小会漏
+    （2026-10-13 踩过：只扫前 4 块，结果一个都没删掉）。
+    仍然只认"块文本整体就是那两类"的块，正文段落里的链接不受影响。
+    """
+
+    out: list = []
+    for index, block in enumerate(blocks):
+        if index <= 12 and not block.xpath(".//img"):
+            text = _normalise_text(_text_value(block)).strip()
+            if NOTION_BULB_RE.match(text) or NOTION_SOURCE_LINE_RE.match(text):
+                continue
+        out.append(block)
+    return out
+
+
+def _strip_notion_property_rows(article: etree._Element) -> int:
+    """删掉容器**内部**的属性行（有些导出会把它塞进正文容器里）。
+
+    正常情况属性表在容器外（`_select_article` 就把它挡掉了），但某些导出
+    会把它放进 notion-page-content 里，那就会变成正文的一部分：
+    每一行被拆成"属性名""属性值"两个段落，直接出现在文章开头
+    （2026-10-13 实测：文章链接 / 作者 / 发布时间 / 来源 四行全泄漏进正文）。
+    """
+
+    labels = {
+        _normalise_notion_label(value)
+        for values in NOTION_PROPERTY_ALIASES.values()
+        for value in values
+    }
+    removed = 0
+    for row in list(article.xpath('.//*[@role="row"]')):
+        cells = row.xpath('.//*[@role="cell"]')
+        if cells and _normalise_notion_label(_text_value(cells[0])) in labels:
+            parent = row.getparent()
+            if parent is not None:
+                parent.remove(row)
+                removed += 1
+    return removed
 
 
 def _strip_notion_property_panel(article: etree._Element) -> None:
@@ -1841,6 +1990,7 @@ def convert(
         _mark_color_annotations(article_copy)
     if process_type == "notion":
         _strip_notion_property_panel(article_copy)
+        _strip_notion_property_rows(article_copy)
     base_values = source.xpath("//base/@href")
     base_href = str(base_values[0]).strip() if base_values else ""
     if not base_href:
@@ -1848,6 +1998,8 @@ def convert(
         base_href = _singlefile_page_url(source)
     image_embedding = _embed_external_images(article_copy, base_href, _notion_public_origin(source))
     blocks, removed_nodes = _normalise_article(article_copy)
+    # 表情/贴图（长边 ≤256）打 class="emoji"，源 xhtml 直接带标记（陈少 2026-10-11）
+    emoji_tag.tag_small_images(blocks)
     if process_type == "javbus":
         blocks = _javbus_merge_metadata_blocks(blocks)
     if process_type == "notion":
@@ -1873,7 +2025,7 @@ def convert(
                 cleaned_blocks.append(paragraph)
             else:
                 cleaned_blocks.append(block)
-        blocks = cleaned_blocks
+        blocks = _strip_notion_source_line(cleaned_blocks)
 
     # Resolve Notion's private attachment URLs while running locally. This is
     # the reliable path for producing a self-contained XHTML file.

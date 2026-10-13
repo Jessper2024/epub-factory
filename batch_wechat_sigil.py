@@ -16,7 +16,7 @@ import sigi_convert as S  # noqa: E402
 from lxml import etree, html as LH  # noqa: E402
 
 SRC = Path("/Users/jessper/Downloads/微信公众号下载").expanduser()
-OUT = Path("/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔").expanduser()
+OUT = Path("/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫笔刀").expanduser()
 
 
 def target_name(path: Path) -> str:

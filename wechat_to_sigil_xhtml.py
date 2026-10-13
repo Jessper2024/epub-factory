@@ -17,11 +17,14 @@
 用法：
   python3 wechat_to_sigil_xhtml.py \
       --src "~/Downloads/微信公众号下载" \
-      --out "/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔"
+      --out "/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫笔刀"
 """
 import os, re, sys, glob, argparse, base64, urllib.request, urllib.error
 from lxml import html as LH
 from lxml import etree
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import emoji_tag  # noqa: E402
 
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -66,7 +69,7 @@ pre { white-space: pre-wrap; }
 table { border-collapse: collapse; max-width: 100%; }
 img { max-width: 100%; height: auto; }
 a { color: inherit; }
-"""
+""" + "\n" + emoji_tag.EMOJI_CSS_RULE
 
 
 # ---------------- 基础工具 ----------------
@@ -816,6 +819,8 @@ def image_report(body):
 
 
 def build_xhtml(blocks, title):
+    # 表情/贴图（长边 ≤256）打 class="emoji"，源 xhtml 直接带标记（陈少 2026-10-11）
+    emoji_tag.tag_small_images(blocks)
     root = etree.Element("{%s}html" % XHTML_NS, nsmap={None: XHTML_NS})
     head = etree.SubElement(root, "{%s}head" % XHTML_NS)
     meta = etree.SubElement(head, "{%s}meta" % XHTML_NS)
@@ -890,7 +895,7 @@ def convert_file(path, out_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default=os.path.expanduser("~/Downloads/微信公众号下载"))
-    ap.add_argument("--out", default="/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫刀笔")
+    ap.add_argument("--out", default="/Users/jessper/Life/学习工厂/02、文稿成品线/02、定稿库/01、微信公众号/猫笔刀")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     files = sorted(glob.glob(os.path.join(os.path.expanduser(args.src), "*.html")))

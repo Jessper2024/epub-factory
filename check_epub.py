@@ -22,6 +22,7 @@ from lxml import etree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core import config  # noqa: E402
+from kindle_check import check_epub_kindle  # noqa: E402  Kindle 兼容性校验
 
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 ROOT = config.root()
@@ -188,7 +189,14 @@ def main():
             if ext:
                 print("    ✗ 有 %d 张外链图" % ext)
             else:
-                print("    ✓ 图片全部内联")
+                print("    ✓ 无外链图（图片已外置为 EPUB 内部资源）")
+            k_issues = check_epub_kindle(ep)
+            if k_issues:
+                total_bad += len(k_issues)
+                for _k in k_issues[:20]:
+                    print("    ✗ Kindle:", _k)
+            else:
+                print("    ✓ Kindle 友好（图片已外置、无 WebP、无缺失）")
             if empty_h:
                 print("    ✗ 有 %d 个空标题" % empty_h)
     print("=" * 60)

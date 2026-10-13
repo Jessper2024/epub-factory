@@ -310,7 +310,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
         ("EPUB 成品", total_epub, "本"),
         ("成品体积", "%.1f" % total_mb, "MB"),
         ("正文字数", "%.1f" % (total_chars / 10000), "万字"),
-        ("配图", total_imgs, "张（全部内联）"),
+        ("配图", total_imgs, "张（已外置为内部资源）"),
         ("小标题", total_secs, "个（三级目录）"),
         ("公众号", len(accounts), "个"),
     ]
