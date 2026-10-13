@@ -48,6 +48,7 @@ class Progress:
             "updated_at": "",
             "finished": False,
             "items": [],          # [{name, state, detail, target}]
+            "books": [],          # 重建的 epub：[{name, state, detail}]
         }
 
     # ── 内容操作 ──────────────────────────────────────────────
@@ -71,6 +72,11 @@ class Progress:
         else:
             self.data["items"].append(
                 {"name": name, "state": state, "detail": detail, "target": target})
+        self._flush()
+
+    def set_book(self, name: str, state: str = "built", detail: str = "") -> None:
+        """记录一本重建的 epub（陈少 2026-10-14：进度页要能看到「更新 epub」阶段）。"""
+        self.data["books"].append({"name": name, "state": state, "detail": detail})
         self._flush()
 
     def finish(self, note: str = "") -> None:

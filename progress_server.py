@@ -81,6 +81,10 @@ PAGE = """<!DOCTYPE html>
   <div class="counts" id="counts"></div>
   <div id="done"></div>
   <ul id="list"></ul>
+  <div id="booksBox" style="display:none;">
+    <div class="sub" style="margin:24px 0 10px;font-weight:600;color:var(--ink);">更新 epub</div>
+    <ul id="books"></ul>
+  </div>
   <div class="links">
     完整日志：<a href="/open/log" target="_blank">_投递箱处理日志.md</a><br>
     处理报告：<a href="/open/report" target="_blank">_处理报告.md</a><br>
@@ -123,6 +127,19 @@ function render(d) {
     return `<li class="${x.state}"><span class="ic">${ic}</span>` +
            `<span class="nm">${esc(x.name)}</span>${tg}</li>`;
   }).join('');
+
+  // 更新 epub 阶段（陈少 2026-10-14：处理投递箱后顺带更新的书）
+  const books = d.books || [];
+  const booksBox = document.getElementById('booksBox');
+  if (books.length) {
+    booksBox.style.display = 'block';
+    document.getElementById('books').innerHTML = books.map(b => {
+      const ic = b.state === 'fail' ? '❌' : '📖';
+      const tg = b.detail ? `<span class="tg">${esc(b.detail)}</span>` : '';
+      return `<li class="${b.state === 'fail' ? 'fail' : 'ok'}"><span class="ic">${ic}</span>` +
+             `<span class="nm">${esc(b.name)}</span>${tg}</li>`;
+    }).join('');
+  }
 
   // 归档数变化时给点反馈（页面在后台也能看到标题闪一下）
   if (okN !== lastCount) {

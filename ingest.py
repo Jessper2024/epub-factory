@@ -401,6 +401,7 @@ def main() -> int:
     if not args.dry_run and TOUCHED_ACCOUNTS:
         import build_epub as B
         print("\n────────── 重建 epub ──────────")
+        _PRG.set_state("（入料完成）", "ok", "开始更新 epub")
         built = 0
         for key, author in sorted(TOUCHED_ACCOUNTS):
             book_dir = P.book_dir(key, author)
@@ -410,9 +411,12 @@ def main() -> int:
                     built += len(outs)
                     for o in outs:
                         print("  ✓ %s" % o.name)
+                        _PRG.set_book(o.name)      # 进度页能看到每本更新了的 epub
             except Exception as exc:      # 单号重建失败不能拖垮整批
                 print("  ✗ 重建失败：%s | %s: %s" % (author, type(exc).__name__, str(exc)[:80]))
+                _PRG.set_book(author, "fail", str(exc)[:60])
         print("重建 %d 本。" % built)
+        _PRG.set_state("（入料完成）", "ok", "已更新 %d 本 epub" % built)
     return 0
 
 
