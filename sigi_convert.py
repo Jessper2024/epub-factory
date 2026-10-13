@@ -190,6 +190,18 @@ p.lead {
   text-indent: 0;
   white-space: normal;
 }
+p.source-link {
+  display: block;
+  margin: 0 0 1.2em;
+  font-size: 0.85em;
+  color: #999;
+  text-align: left;
+  text-indent: 0;
+}
+p.source-link a {
+  color: #576b95;
+  text-decoration: none;
+}
 p.image {
   margin: 7px 0 0;
   text-align: center;
@@ -589,6 +601,25 @@ def notion_source_url(source: etree._Element) -> str:
         return value.strip()
     for node in source.xpath('//a[contains(@href, "mp.weixin.qq.com")]/@href'):
         return node.strip()
+    return ""
+
+
+def source_url(source: etree._Element, process_type: str = "wechat") -> str:
+    """统一取原文链接（陈少 2026-10-13 定：每篇正文顶部留「原文链接」）。
+
+    按来源类型抽，取不到返回空（不猜）：
+      wechat → og:url / msg_link（微信官网快照）
+      notion → 属性表「文章链接」/ 正文链接行
+    """
+    ptype = _process_type(process_type)
+    if ptype == "notion":
+        return notion_source_url(source)
+    for xp in ('//meta[@property="og:url"]/@content',
+               '//link[@rel="canonical"]/@href',
+               '//meta[@name="wechat:url"]/@content'):
+        vals = source.xpath(xp)
+        if vals and vals[0].strip():
+            return vals[0].strip()
     return ""
 
 
@@ -2059,6 +2090,14 @@ def convert(
     if metadata:
         meta_block = etree.SubElement(body, f"{{{ns}}}p", attrib={"class": "article-meta"})
         meta_block.text = " · ".join(metadata)
+    # 原文链接（陈少 2026-10-13 定）：每篇正文顶部留可点击的原文链接。
+    # 锚文本固定「原文链接」四个字，完整 URL 藏进 href —— 界面干净，长链不撑破。
+    page_url = source_url(source, process_type)
+    if page_url:
+        link_block = etree.SubElement(body, f"{{{ns}}}p", attrib={"class": "source-link"})
+        anchor = etree.SubElement(link_block, f"{{{ns}}}a")
+        anchor.set("href", page_url)
+        anchor.text = "原文链接"
     for block in blocks:
         body.append(_to_xhtml(block, ns))
 

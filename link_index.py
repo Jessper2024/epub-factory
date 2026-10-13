@@ -29,6 +29,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 INDEX_FILE = ROOT / "_链接索引.json"
 
+# 值结构：{稳定 ID: {"url": 完整原文链接, "where": "平台/作者/文件名"}}
+# 为什么存完整 url 而不只存 where（陈少 2026-10-13 定）：
+#   陈少要「每篇正文顶部留原文链接」，判重时若能同时拿到完整 URL，
+#   就能回填进正文，不用再回到原始 HTML 里找。稳定 ID 只够判重，不够回填。
+
 # 各平台的稳定 ID 提取规则：(平台, 正则, 前缀)
 ID_RULES = (
     ("zhihu", re.compile(r"/question/(\d+)"), "q"),
@@ -57,11 +62,21 @@ def link_id(url: str) -> str:
 
 
 def load() -> dict:
-    """{稳定 ID: "平台/作者/文件名"}。坏了返回空表，不让索引问题挡住入料。"""
+    """{稳定 ID: {url, where}}。坏了返回空表，不让索引问题挡住入料。
+
+    兼容旧格式（值可能是字符串 where）：读取时自动归一化成 dict。
+    """
     try:
         if INDEX_FILE.exists():
             data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                out = {}
+                for k, v in data.items():
+                    if isinstance(v, str):
+                        out[k] = {"url": "", "where": v}   # 旧格式：没存 url
+                    elif isinstance(v, dict):
+                        out[k] = {"url": v.get("url", ""), "where": v.get("where", "")}
+                return out
     except Exception:
         pass
     return {}
@@ -78,20 +93,42 @@ def save(mapping: dict) -> None:
 def find(url: str) -> str:
     """这个链接收过没有。返回已有文件的描述，没收录返回空。"""
     lid = link_id(url)
-    return load().get(lid, "") if lid else ""
+    if not lid:
+        return ""
+    entry = load().get(lid)
+    return entry["where"] if entry else ""
+
+
+def find_url(url: str) -> str:
+    """这个链接对应的完整原文 URL（回填正文用）。没收录返回空。"""
+    lid = link_id(url)
+    if not lid:
+        return ""
+    entry = load().get(lid)
+    if not entry:
+        return ""
+    return entry.get("url", "") or url
 
 
 def register(url: str, where: str) -> bool:
-    """登记一篇的链接 ID。返回是否新增（用于统计）。"""
+    """登记一篇：同时存稳定 ID + 完整 URL。返回是否新增（用于统计）。"""
     lid = link_id(url)
     if not lid:
         return False
     idx = load()
-    if lid in idx:
+    if lid in idx and idx[lid].get("where"):
         return False
-    idx[lid] = where
+    idx[lid] = {"url": url, "where": where}
     save(idx)
     return True
+
+
+def url_by_where(where: str) -> str:
+    """按「平台/作者/文件名」反查完整 URL（回填存量用）。"""
+    for entry in load().values():
+        if entry.get("where") == where:
+            return entry.get("url", "")
+    return ""
 
 
 def count() -> int:
