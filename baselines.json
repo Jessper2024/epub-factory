@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T05:35:55",
-    "git": "2c20444",
+    "updated_at": "2026-10-14T05:40:47",
+    "git": "166981b",
     "books": 44
   },
   "DeepSeek_202604-202609.epub": {
@@ -324,15 +324,20 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "高群（未成书）": {
+  "高群.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
     "source_xhtml": 1
   },
   "周不渡.epub": {
-    "size_mb": 4.1,
-    "months": 0,
-    "articles": 3,
-    "toc": 3,
-    "parts": 1,
+    "size_mb": 5.4,
+    "months": 2,
+    "articles": 4,
+    "toc": 12,
+    "parts": 2,
     "source_xhtml": 4
   },
   "Morris.epub": {

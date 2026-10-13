@@ -101,6 +101,19 @@ p {
   text-align: justify;
   text-indent: 0;
 }
+/* 翻书可见目录页（陈少 2026-10-14：完整两级，不含小标题） */
+body.toc-page { margin: 2em 6%; }
+body.toc-page h1.toc-title {
+  font-size: 1.8em; font-weight: bold; text-align: center;
+  margin: 0 0 1.5em; letter-spacing: 0.05em;
+}
+body.toc-page ol.toc-list { padding-left: 0; margin: 0; }
+body.toc-page ol.toc-list li { list-style: none; margin: 0.5em 0; }
+body.toc-page ol.toc-list > li > a {
+  font-weight: bold; font-size: 1.15em; color: #1a1a1a; text-decoration: none;
+}
+body.toc-page ol.toc-list ol { padding-left: 1.5em; margin: 0.3em 0; }
+body.toc-page ol.toc-list ol a { color: #333; text-decoration: none; font-weight: normal; }
 h1.month {
   font-size: 1.7em;
   font-weight: bold;
@@ -731,6 +744,42 @@ def build_nav(months: list[tuple[str, str, list[Article]]], anchor_ids: dict[int
     return root
 
 
+def build_toc_page(months: list[tuple[str, str, list[Article]]], anchor_ids: dict[int, str],
+                   book_title: str, file_of_month: dict[str, str], single: bool = False):
+    """「翻书可见」的目录页：完整两级（分区 → 文章标题），**不含小标题**。
+
+    陈少 2026-10-14 定：所有 EPUB 都要有一页能翻到的目录，内容是「分区(h1) + 文章(h2)」
+    两级，不要文内小标题。与 build_nav（三级、供阅读器导航菜单）分开——
+    nav.xhtml 带 properties="nav" 会被阅读器藏起来不显示，这页是不带标记的普通页，
+    插在封面之后、正文之前，翻书就能看到。
+    """
+    root = etree.Element(f"{{{XHTML_NS}}}html", nsmap=NSMAP)
+    head = elem(root, "head")
+    elem(head, "title", text="目录")
+    etree.SubElement(head, f"{{{XHTML_NS}}}link",
+                     attrib={"rel": "stylesheet", "type": "text/css", "href": "../Styles/main.css"})
+    body = elem(root, "body")
+    body.set("class", "toc-page")
+    elem(body, "h1", text="目录", attrib={"class": "toc-title"})
+    ol = elem(body, "ol", attrib={"class": "toc-list"})
+    if single:
+        month_key, _, arts = months[0]
+        for art in arts:
+            li = elem(ol, "li")
+            elem(li, "a", text=art.heading,
+                 attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+    else:
+        for month_key, label, arts in months:
+            li = elem(ol, "li")
+            elem(li, "a", text=label, attrib={"href": file_of_month[month_key]})
+            sub = elem(li, "ol")
+            for art in arts:
+                sli = elem(sub, "li")
+                elem(sli, "a", text=art.heading,
+                     attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+    return root
+
+
 def build_ncx(months, anchor_ids, book_title, uid, file_of_month, single: bool = False):
     ncx = etree.Element("{http://www.daisy.org/z3986/2005/ncx/}ncx",
                         nsmap={None: "http://www.daisy.org/z3986/2005/ncx/"},
@@ -984,6 +1033,7 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
 
     items: list[tuple[str, str, str]] = [
         ("nav", "Text/nav.xhtml", "application/xhtml+xml"),
+        ("toc", "Text/toc.xhtml", "application/xhtml+xml"),   # 翻书可见目录页（陈少 2026-10-14）
         ("css", "Styles/main.css", "text/css"),
         ("ncx", "toc.ncx", "application/x-dtbncx+xml"),
     ]
@@ -1014,7 +1064,8 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
         items.append(("cover", "Text/cover.xhtml", "application/xhtml+xml"))
         spine_ids.append("cover")
         cover_id = "cover-image"
-    spine_ids.append("nav")  # 封面之后是目录
+    spine_ids.append("toc")  # 封面之后 = 翻书可见的目录页（陈少 2026-10-14）
+    spine_ids.append("nav")  # 再是阅读器导航目录
 
     for i, (month_key, label, group) in enumerate(months, 1):
         href = file_of_month[month_key]
@@ -1028,6 +1079,12 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
         spine_ids.append("p%03d" % i)
 
     items.extend(list(_IMG_REGISTRY.values()))  # 外置图片进 manifest（去重后）
+
+    toc_root = build_toc_page(months, anchor_ids, book_title, file_of_month, single=single)
+    z.writestr("OEBPS/Text/toc.xhtml",
+               b"<?xml version='1.0' encoding='utf-8'?>\n"
+               + etree.tostring(toc_root, encoding="UTF-8", xml_declaration=False,
+                                doctype='<!DOCTYPE html>'))
 
     nav_root = build_nav(months, anchor_ids, book_title, file_of_month, single=single)
     z.writestr("OEBPS/Text/nav.xhtml",
