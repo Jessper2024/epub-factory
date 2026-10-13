@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-13T13:57:51",
-    "git": "aaba2e2",
-    "books": 41
+    "updated_at": "2026-10-13T14:17:59",
+    "git": "479e7bd",
+    "books": 43
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -292,6 +292,14 @@
     "parts": 1,
     "source_xhtml": 33
   },
+  "WaWoWaWo678_202601.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 1
+  },
   "子不语999_202501.epub": {
     "size_mb": 0.0,
     "months": 0,
@@ -330,6 +338,14 @@
     "articles": 3,
     "toc": 3,
     "parts": 1,
+    "source_xhtml": 3
+  },
+  "jasonleo_202609-202610.epub": {
+    "size_mb": 0.0,
+    "months": 2,
+    "articles": 3,
+    "toc": 6,
+    "parts": 2,
     "source_xhtml": 3
   }
 }

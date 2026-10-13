@@ -1121,7 +1121,11 @@ def sanitize_office_markup(path: Path) -> int:
 # 为什么不能用字节数：Twitter/微博的短帖正文可能只有两三百字，
 # 转出来不到 3KB，但它不是空壳（2026-10-13 实测：Morris 那三篇被误拦）。
 # 真正的空壳是"正文一个字都没有"——那种无论文件多大都是坏的。
-MIN_BODY_CHARS = 80
+#
+# 为什么从 80 降到 40：推文可以很短。2026-10-13 实测 Jason 那第三条
+# 正文 93 字（完整推文，同作者另两条是 118/155 字），被 80 卡掉过一次。
+# 40 字仍能挡住真正的空壳（那种只有 0-10 字），又不会误伤短帖。
+MIN_BODY_CHARS = 40
 
 
 def is_empty_shell(path: Path) -> tuple[bool, int]:
