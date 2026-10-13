@@ -249,6 +249,15 @@ def normalize_headings(nodes: list) -> int:
             # 命中降级名单的一律回 <p>，不进目录（陈少 2026-10-13 定）。
             if text in DEMOTE_HEADING_TEXTS:
                 new = "p"
+                # 同时摘掉 section-title 类，否则 <p> 仍套标题样式（陈少 2026-10-13）
+                cls = (sub.get("class") or "")
+                if "section-title" in cls:
+                    rest = " ".join(c for c in cls.split() if c != "section-title")
+                    if rest:
+                        sub.set("class", rest)
+                    else:
+                        sub.attrib.pop("class", None)
+                sub.attrib.pop("id", None)      # 标题锚点也一并去掉
             elif lname(sub) == "h3":
                 new = "h3"          # 已经是 h3 的（真小标题）不动
             else:
