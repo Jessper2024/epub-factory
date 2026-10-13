@@ -25,6 +25,7 @@ shell 的 unzip 会报 "Illegal byte sequence"。
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import re
 import shutil
 import sys
@@ -254,16 +255,42 @@ def collect_targets(args) -> list[Path]:
     return out
 
 
+def _write_run_log(started: dt.datetime, ok: int, unknown: int, skipped: int,
+                   note: str = "") -> None:
+    """往 `_投递箱处理日志.md` 追一行。
+
+    为什么单独一个日志：定时任务是无人值守跑的（launchd），它不写 `_处理报告.md`
+    （那是手动跑才写的）。没有这个文件，陈少双击后根本分不清
+    "定时跑的"和"我自己跑的"、也看不到上次是什么时候（2026-10-13 陈少问）。
+    """
+    log = ROOT / "_投递箱处理日志.md"
+    line = "| %s | %d | %d | %d | %s |\n" % (
+        started.strftime("%Y-%m-%d %H:%M"), ok, unknown, skipped, note or "—")
+    try:
+        if not log.exists():
+            log.write_text(
+                "# 投递箱处理日志\n\n"
+                "每次 ingest（含定时任务）追加一行。看最近几次就知道有没有在跑。\n\n"
+                "| 时间 | 归档 | 待判 | 跳过 | 备注 |\n"
+                "|---|---|---|---|---|\n", encoding="utf-8")
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        pass
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="统一入料：Notion HTML / ZIP → 平台/作者")
+    ap = argparse.ArgumentParser(description="统一入料：微信 / Notion HTML / ZIP → 平台/作者")
     ap.add_argument("files", nargs="*", help="要处理的文件；不给则扫投递箱")
     ap.add_argument("--dry-run", action="store_true", help="只预演，不落地")
     args = ap.parse_args()
 
     targets = collect_targets(args)
+    started = dt.datetime.now()
     print("入料%s　共 %d 个文件" % ("（预演）" if args.dry_run else "", len(targets)))
     if not targets:
         print("投递箱里没有 html / zip。")
+        _write_run_log(started, 0, 0, 0, note="无待处理文件")
         return 0
 
     staged: list[Path] = []
@@ -313,6 +340,9 @@ def main() -> int:
         print("  ⚠ 有 %d 个落进待判目录，需要人工看一眼：%s" % (unknown, UNKNOWN_DIR))
     if args.dry_run:
         print("（预演，未落地。确认后去掉 --dry-run 执行）")
+    else:
+        _write_run_log(started, ok, unknown, skipped,
+                       note="手动" if args.files else "投递箱")
     return 0
 
 
