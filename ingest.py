@@ -159,6 +159,10 @@ def probe(path: Path) -> dict:
     }
 
 
+# 本次 run 归档过的号（陈少 2026-10-14：处理投递箱后要精准重建这些号的 epub）
+TOUCHED_ACCOUNTS: set[str] = set()
+
+
 def archive(info: dict, dry_run: bool = False) -> Path | None:
     """归档一篇 Notion 导出：转 XHTML → 落到 平台/作者/xhtml/。返回产出路径。
 
@@ -220,6 +224,8 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     # 登记链接 ID：原件马上要删，之后再想补索引就没来源了
     link_index.register(info.get("url", ""),
                         "%s/%s/%s" % (P.PLATFORMS[key], author, out.name))
+
+    TOUCHED_ACCOUNTS.add((key, author))
 
     # ── html 原始留底（陈少 2026-10-13 定）：入料时 copy 一份，原件仍进废纸篓 ──
     # 说明：PDF 线**暂停**（陈少 2026-10-13：PDF 暂不成熟，后续再想）。
@@ -385,6 +391,24 @@ def main() -> int:
         _write_run_log(started, ok, unknown, skipped,
                        note="手动" if args.files else "投递箱")
     _PRG.finish("归档 %d，待判 %d，跳过 %d" % (ok, unknown, skipped))
+
+    # ── 入料后精准重建 epub（陈少 2026-10-14：处理投递箱要顺带把 epub 更新了）──
+    # 只重建本次归档过的号，不碰没变的号（方案 B）。
+    if not args.dry_run and TOUCHED_ACCOUNTS:
+        import build_epub as B
+        print("\n────────── 重建 epub ──────────")
+        built = 0
+        for key, author in sorted(TOUCHED_ACCOUNTS):
+            book_dir = P.book_dir(key, author)
+            try:
+                outs = B.build_all(author, book_dir)
+                if outs:
+                    built += len(outs)
+                    for o in outs:
+                        print("  ✓ %s" % o.name)
+            except Exception as exc:      # 单号重建失败不能拖垮整批
+                print("  ✗ 重建失败：%s | %s: %s" % (author, type(exc).__name__, str(exc)[:80]))
+        print("重建 %d 本。" % built)
     return 0
 
 
