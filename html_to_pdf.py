@@ -171,10 +171,10 @@ PROP_ICON = {
 }
 # 有胶囊底色的属性（照陈少截图：作者=橙、来源=绿；其余纯文本）
 PROP_PILL = {
-    "作者": "pill-amber",
+    "作者": "pill-pink",       # 照陈少截图：作者粉
     "来源": "pill-green",
-    "类型": "pill-purple",
-    "平台": "pill-purple",
+    "类型": "pill-blue",       # 照陈少截图：类型蓝
+    "平台": "pill-blue",
 }
 
 
@@ -208,11 +208,9 @@ def build_html(info: dict, platform: str = "") -> str:
     parts = []
     icon_uri = platform_icon_data_uri(platform)
     if icon_uri:
-        parts.append('<div class="ptitle-row"><img class="pico-img" src="%s">'
-                     '<h1 class="ptitle">%s</h1></div>'
-                     % (icon_uri, html_mod.escape(info["title"])))
-    else:
-        parts.append('<h1 class="ptitle">%s</h1>' % html_mod.escape(info["title"]))
+        # 图标在标题**上方**（大、左对齐）—— 陈少 2026-10-13 截图定稿
+        parts.append('<img class="pico-img" src="%s">' % icon_uri)
+    parts.append('<h1 class="ptitle">%s</h1>' % html_mod.escape(info["title"]))
     _ = info.get("icon")            # Notion 页面图标不再用（平台图标取代）
 
     if info["props"]:
@@ -242,10 +240,9 @@ def build_html(info: dict, platform: str = "") -> str:
     body { font-family:'PingXianZhenSong','Songti SC',serif;
            color:#1a1a1a !important; background:#ffffff !important;
            font-size:11.5pt; line-height:1.85; }
-    .ptitle-row { display:flex; align-items:center; gap:20px; margin:22px 0 26px; }
-    .pico-img { width:64px; height:64px; flex:none; }
+    .pico-img { width:110px; height:110px; display:block; margin:6px 0 26px; }
     .ptitle { font-size:26pt; font-weight:600; line-height:1.5;
-              margin:0; letter-spacing:.5px; }
+              margin:0 0 26px; letter-spacing:.5px; }
     .ptable { margin:0 0 26px; font-size:10.5pt; }
     .prow { display:flex; align-items:center; line-height:1.9; }
     .pico { width:1.6em; flex:none; color:#9b9691; font-size:11pt; }
@@ -253,9 +250,9 @@ def build_html(info: dict, platform: str = "") -> str:
     .pval { color:#37352f; word-break:break-all; }
     .prow.more .pkey { color:#a5a09b; }
     .pill { padding:1px 8px; border-radius:3px; font-size:10pt; }
-    .pill-amber { background:#fadec9; color:#5c3b12; }
+    .pill-pink { background:#f5c9d8; color:#5c1e38; }
+    .pill-blue { background:#c3d9f5; color:#0c3a6e; }
     .pill-green { background:#dbeddb; color:#1c3829; }
-    .pill-purple { background:#e8deee; color:#412454; }
     p { margin:0 0 0.9em; text-align:justify; }
     figure.pic { margin:1.1em 0; text-align:center;
                  break-inside:avoid; page-break-inside:avoid; }
@@ -417,7 +414,7 @@ def convert_one(src: Path, out_pdf: Path) -> bool:
         platform = platform_from_url(url)
     # 属性表补「类型」行：抽不到就用平台判定结果（保持 4 行齐）
     if platform and not any(k == "类型" for k, _ in info["props"]):
-        info["props"].insert(1, ("类型", platform))
+        info["props"].append(("类型", platform))   # 照截图：类型放最后
     log("标题：%s" % (info["title"][:40] or "（无）"))
     log("属性 %d 行 · 正文块 %d 个（图 %d 张）"
         % (len(info["props"]), len(info["blocks"]),
