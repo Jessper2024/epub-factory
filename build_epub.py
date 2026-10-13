@@ -172,6 +172,14 @@ def safe_stem(name: str) -> str:
 # 超过这个长度就不是标题，是被引擎误判成标题的正文段落
 MAX_HEADING_LEN = 40
 
+# 从标题降回正文的确切文本（陈少 2026-10-13 定：小红书导出把这类说明标成 h3）。
+# 与 sigi_convert.DEMOTE_HEADING_TEXTS 保持同一份名单。
+DEMOTE_HEADING_TEXTS = {
+    "文章中收集到的图片链接",
+    "文章中的图片链接",
+    "图片链接",
+}
+
 # 转换器漏判的序号小标题。微信同一公众号的文章模板不统一：
 # 有的写 <h5>01</h5>（能识别），有的写 <section>01</section> / <p>03</p>（纯文本，判不出来）。
 # 只对「独立成块 + 无图片 + 无子块 + 序号开头 + 简短」的块提升为 h3。
@@ -230,15 +238,22 @@ def normalize_headings(nodes: list) -> int:
                 node.set("data-caption", "1")
         prev_has_img = has_img
 
-    # 2) h1/h2 → h3，不合格的降回 <p>
+    # 2) h1/h2 → h3，不合格的降回 <p>；已是 h3 但命中降级名单的也降回 <p>
     for node in nodes:
         for sub in node.iter():
-            if lname(sub) not in ("h1", "h2"):
+            if lname(sub) not in ("h1", "h2", "h3"):
                 continue
             text = "".join(sub.itertext()).strip()
             is_caption = bool(sub.xpath('ancestor-or-self::*[@data-caption]'))
-            new = "p" if (not text or len(text) > MAX_HEADING_LEN
-                          or text.startswith("[") or is_caption) else "h3"
+            # 小红书导出会把「文章中收集到的图片链接」这类说明标成 h3；
+            # 命中降级名单的一律回 <p>，不进目录（陈少 2026-10-13 定）。
+            if text in DEMOTE_HEADING_TEXTS:
+                new = "p"
+            elif lname(sub) == "h3":
+                new = "h3"          # 已经是 h3 的（真小标题）不动
+            else:
+                new = "p" if (not text or len(text) > MAX_HEADING_LEN
+                              or text.startswith("[") or is_caption) else "h3"
             if lname(sub) != new:
                 sub.tag = f"{{{XHTML_NS}}}{new}"
                 changed += 1
@@ -254,7 +269,10 @@ def normalize_headings(nodes: list) -> int:
                 continue
             if sub.xpath('ancestor-or-self::*[@data-caption]'):
                 continue
-            if looks_like_heading("".join(sub.itertext()).strip()):
+            sub_text = "".join(sub.itertext()).strip()
+            if sub_text in DEMOTE_HEADING_TEXTS:
+                continue                      # 说明文字不该被抬成标题
+            if looks_like_heading(sub_text):
                 sub.tag = f"{{{XHTML_NS}}}h3"
                 changed += 1
 

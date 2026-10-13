@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "updated_at": "2026-10-13T20:37:04",
-    "git": "1b2a1e9",
+    "updated_at": "2026-10-13T20:56:40",
+    "git": "3756c05",
     "books": 39
   },
   "DeepSeek_202604-202609.epub": {
@@ -296,7 +296,7 @@
     "size_mb": 4.1,
     "months": 0,
     "articles": 3,
-    "toc": 7,
+    "toc": 4,
     "parts": 1,
     "source_xhtml": 3
   },

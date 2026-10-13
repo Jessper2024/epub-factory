@@ -132,6 +132,20 @@ SECTION_TITLE_RE = re.compile(
 )
 SECTION_TITLE_MAX_LEN = 60
 PLAIN_NUMBERED_RE = re.compile(r"^\s*\d+\s*[、]")
+
+# 不该当标题的行（陈少 2026-10-13 定）：小红书导出里这类「说明文字」会被
+# 源 HTML 标成 <h3>，照搬就进目录了。命中就降回正文段落。
+# 只放**确切的一句话**，不要用模糊匹配——宁可漏降级，也别把真标题误降。
+DEMOTE_HEADING_TEXTS = {
+    "文章中收集到的图片链接",
+    "文章中的图片链接",
+    "图片链接",
+}
+
+
+def _should_demote_heading(text: str) -> bool:
+    """这行文本是否该从标题降回正文（陈少 2026-10-13 定）。"""
+    return (text or "").strip() in DEMOTE_HEADING_TEXTS
 BOOK_CSS = """\
 html { margin: 0; padding: 0; }
 body {
@@ -1794,6 +1808,7 @@ def _finish_paragraph(
         paragraph_text
         and len(paragraph_text) <= SECTION_TITLE_MAX_LEN
         and not PLAIN_NUMBERED_RE.match(paragraph_text)
+        and not _should_demote_heading(paragraph_text)
         and (SECTION_TITLE_RE.match(paragraph_text) or centered)
     ):
         heading_counter[0] += 1
@@ -1860,6 +1875,7 @@ def _is_section_title(node: etree._Element) -> bool:
     # them; ordinary layout sections must remain paragraph containers.
     return (
         not PLAIN_NUMBERED_RE.match(text)
+        and not _should_demote_heading(text)
         and (bool(SECTION_TITLE_RE.match(text)) or node.get(INTERNAL_CENTER_ATTR) == "1")
     )
 
@@ -1889,7 +1905,9 @@ def _normalise_block(node: etree._Element, heading_counter: list[int]) -> list[e
         # Some snapshots use a heading tag for every numbered block.  Chinese
         # ``1、正文`` entries are prose lists, so demote them to a reflowable
         # paragraph even when the source tag says h2/h3.
-        if PLAIN_NUMBERED_RE.match(_text_value(node)):
+        # 同理：小红书导出把「文章中收集到的图片链接」这类说明文字标成 h3，
+        # 那不是标题，一并降回正文（陈少 2026-10-13 定）。
+        if PLAIN_NUMBERED_RE.match(_text_value(node)) or _should_demote_heading(_text_value(node)):
             return _normalise_paragraph(node, heading_counter)
         heading_tag = "h1" if tag == "h1" else "h2"
         heading = etree.Element(heading_tag, attrib={"class": "section-title"})
