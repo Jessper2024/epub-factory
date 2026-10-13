@@ -347,7 +347,7 @@ def parse_meta_row(text: str):
         p for p in parts
         if p not in ("原创", "转载")
         and not DATE_IN_TEXT_RE.search(p)
-        and not re.fullmatch(r"[\d:年月日\s]+", p)
+        and not re.fullmatch(r"[\d:年月日/\s]+", p)   # 含 / 斜杠日期（2025/05/16）
     ]
     author = names[0] if len(names) >= 2 else ""
     account = names[1] if len(names) >= 2 else (names[0] if names else "")
@@ -408,10 +408,15 @@ def parse_article(path: Path) -> Article | None:
     # 3 段式（日期_作者_标题，旧 EPUB 拆出的）不能从文件名取号名，回退 meta 行。
     account = author = ""
     stem = path.stem.replace("-Sigil", "")
-    parts = stem.split("_")
+    # 过滤空段：标题净化会在结尾留 `_`（如「吹警校_」），split 出空段会把
+    # len==3 误判成 4 段式，标题就被当成作者（陈少 2026-10-14 报的 bug）——踩过。
+    parts = [x for x in stem.split("_") if x.strip()]
     if len(parts) >= 4 and DATE_IN_TEXT_RE.match(parts[0]):
         account = parts[1]
         author = parts[2]
+    elif len(parts) == 3 and DATE_IN_TEXT_RE.match(parts[0]):
+        # 3 段式（日期_作者_标题，知乎/Twitter 等非公众号）：作者取第 2 段
+        author = parts[1]
     if not account:
         account = m_account
     if not author:
