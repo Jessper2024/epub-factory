@@ -49,6 +49,7 @@ class Progress:
             "finished": False,
             "items": [],          # [{name, state, detail, target}]
             "books": [],          # 重建的 epub：[{name, state, detail}]
+            "disassembles": [],   # epub 拆解：[{name, state, detail}]（陈少 2026-10-14）
         }
 
     # ── 内容操作 ──────────────────────────────────────────────
@@ -77,6 +78,25 @@ class Progress:
     def set_book(self, name: str, state: str = "built", detail: str = "") -> None:
         """记录一本重建的 epub（陈少 2026-10-14：进度页要能看到「更新 epub」阶段）。"""
         self.data["books"].append({"name": name, "state": state, "detail": detail})
+        self._flush()
+
+    def set_disasm(self, name: str, state: str = "done", detail: str = "") -> None:
+        """记录一本 epub 的拆解进度（陈少 2026-10-14：进度页要能看到拆解线）。"""
+        for item in self.data["disassembles"]:
+            if item["name"] == name:
+                item["state"] = state
+                item["detail"] = detail
+                break
+        else:
+            self.data["disassembles"].append(
+                {"name": name, "state": state, "detail": detail})
+        self._flush()
+
+    def plan_disasm(self, names: list[str]) -> None:
+        """拆解前先列清单（waiting），页面马上看到「有几本要拆」。"""
+        self.data["disassembles"] = [
+            {"name": n, "state": "waiting", "detail": ""} for n in names
+        ]
         self._flush()
 
     def finish(self, note: str = "") -> None:

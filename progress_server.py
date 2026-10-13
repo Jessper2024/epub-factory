@@ -85,6 +85,10 @@ PAGE = """<!DOCTYPE html>
     <div class="sub" style="margin:24px 0 10px;font-weight:600;color:var(--ink);">更新 epub</div>
     <ul id="books"></ul>
   </div>
+  <div id="disasmBox" style="display:none;">
+    <div class="sub" style="margin:24px 0 10px;font-weight:600;color:var(--ink);">epub 拆解</div>
+    <ul id="disasm"></ul>
+  </div>
   <div class="links">
     完整日志：<a href="/open/log" target="_blank">_投递箱处理日志.md</a><br>
     处理报告：<a href="/open/report" target="_blank">_处理报告.md</a><br>
@@ -138,6 +142,24 @@ function render(d) {
       const tg = b.detail ? `<span class="tg">${esc(b.detail)}</span>` : '';
       return `<li class="${b.state === 'fail' ? 'fail' : 'ok'}"><span class="ic">${ic}</span>` +
              `<span class="nm">${esc(b.name)}</span>${tg}</li>`;
+    }).join('');
+  }
+
+  // epub 拆解阶段（陈少 2026-10-14）
+  const disasm = d.disassembles || [];
+  const disasmBox = document.getElementById('disasmBox');
+  if (disasm.length) {
+    disasmBox.style.display = 'block';
+    document.getElementById('disasm').innerHTML = disasm.map(x => {
+      const ic = x.state === 'running' ? `<span class="spin">⏳</span>`
+               : x.state === 'done' ? '📦'
+               : x.state === 'fail' ? '❌'
+               : x.state === 'dup' ? '⏭' : '⬜';
+      const cls = x.state === 'running' ? 'running'
+                : x.state === 'fail' ? 'fail' : (x.state === 'done' ? 'ok' : 'waiting');
+      const tg = x.detail ? `<span class="tg">${esc(x.detail)}</span>` : '';
+      return `<li class="${cls}"><span class="ic">${ic}</span>` +
+             `<span class="nm">${esc(x.name)}</span>${tg}</li>`;
     }).join('');
   }
 

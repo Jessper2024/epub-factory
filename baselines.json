@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T03:55:14",
-    "git": "b0368dd",
-    "books": 43
+    "updated_at": "2026-10-14T05:35:55",
+    "git": "2c20444",
+    "books": 44
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -34,7 +34,15 @@
     "articles": 1,
     "toc": 1,
     "parts": 1,
-    "source_xhtml": 1
+    "source_xhtml": 17
+  },
+  "九边六镇合集.epub": {
+    "size_mb": 2.0,
+    "months": 2,
+    "articles": 17,
+    "toc": 23,
+    "parts": 2,
+    "source_xhtml": 17
   },
   "互联网怪盗团_202609.epub": {
     "size_mb": 0.1,
@@ -170,7 +178,7 @@
     "articles": 12,
     "toc": 12,
     "parts": 1,
-    "source_xhtml": 42
+    "source_xhtml": 43
   },
   "猫笔刀_202609.epub": {
     "size_mb": 4.3,
@@ -178,15 +186,15 @@
     "articles": 18,
     "toc": 19,
     "parts": 1,
-    "source_xhtml": 42
+    "source_xhtml": 43
   },
   "猫笔刀_202610.epub": {
-    "size_mb": 2.6,
+    "size_mb": 2.4,
     "months": 0,
     "articles": 13,
     "toc": 13,
     "parts": 1,
-    "source_xhtml": 42
+    "source_xhtml": 43
   },
   "王张三_202309-202512.epub": {
     "size_mb": 1.3,

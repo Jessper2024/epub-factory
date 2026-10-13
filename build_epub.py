@@ -187,7 +187,17 @@ DEMOTE_HEADING_TEXTS = {
     "—— 您的鼓励，是我们更文前进的动力 ——",
     "您的鼓励，是我们更文前进的动力",
     "点赞、在看、转发",
+    # 微信图片轮播提示（陈少 2026-10-14：九边六镇合集踩到）
+    "←左右滑动查看更多→Slide for more photos",
+    "左右滑动查看更多",
+    "Slide for more photos",
 }
+
+# 纯序号（如「1、」「2、」后面没有实质文字）——不是标题，是序号被误拆成了 h3
+# （陈少 2026-10-14：九边「为啥不建议你们去坐牢」正文里 1、2、3、4 被拆成 h3）
+PURE_NUMBER_HEADING_RE = re.compile(
+    r'^[0-9一二三四五六七八九十]{1,3}\s*[、.．:：]?\s*$'
+)
 
 # 转换器漏判的序号小标题。微信同一公众号的文章模板不统一：
 # 有的写 <h5>01</h5>（能识别），有的写 <section>01</section> / <p>03</p>（纯文本，判不出来）。
@@ -866,16 +876,33 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
 
     arts.sort(key=lambda a: a.sort_key)
 
-    # 按月分组，保持从旧到新
+    # 分组键：默认按月；「按来源号分区」的号（九边六镇合集）改按作者/号名分组
+    # （陈少 2026-10-14 定：九边、六镇两个号合一本，h1 用来源号做一级目录）。
+    merged_order = MERGED_BY_SOURCE.get(account)
     months: list[tuple[str, str, list[Article]]] = []
     for art in arts:
         if year is not None and not art.month_key.startswith(str(year)):
             continue
         if month is not None and art.month_key != month:
             continue
-        if not months or months[-1][0] != art.month_key:
-            months.append((art.month_key, art.month_label, []))
+        if merged_order is not None:
+            # 按来源号分组：号名（account，第2段）做 key，label 也是号名
+            # （不能用 author——九边的作者有的写"九边"、有的写"跑哥的自留地"，不稳定）
+            grp_key = art.account if art.account in merged_order else account
+        else:
+            grp_key = art.month_key
+            grp_label = art.month_label
+        if merged_order is not None:
+            if not months or months[-1][0] != grp_key:
+                months.append((grp_key, grp_key, []))
+        else:
+            if not months or months[-1][0] != art.month_key:
+                months.append((art.month_key, art.month_label, []))
         months[-1][2].append(art)
+    # 按来源号分区时，重排成配置里指定的顺序（九边在前、六镇在后）
+    if merged_order is not None:
+        order = {name: i for i, name in enumerate(merged_order)}
+        months.sort(key=lambda m: order.get(m[0], 99))
     if not months:
         if month is not None:
             log("  %s：%s 月没有文章，跳过" % (account, month))
@@ -915,8 +942,13 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
         span = "%d年%d月-%d年%d月" % (dates[0][0], dates[0][1], dates[-1][0], dates[-1][1])
     else:
         span = ""
-    book_title = (account + " " + span).strip() if span else account
-    author = account  # 图书作者 = 公众号博主，不是文章里的笔名（如 moomoocat）
+    if account in MERGED_BY_SOURCE:
+        # 来源号合订本（九边六镇合集）：书名用「号名合集」，不带月份范围
+        book_title = "".join(MERGED_BY_SOURCE[account]) + "合集"
+        author = "".join(MERGED_BY_SOURCE[account])   # 合集作者 = 两个号名并列
+    else:
+        book_title = (account + " " + span).strip() if span else account
+        author = account  # 图书作者 = 公众号博主，不是文章里的笔名（如 moomoocat）
 
     out_dir.mkdir(parents=True, exist_ok=True)
     # 命名规则（陈少 2026-10-13 定）：
@@ -925,7 +957,10 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     #   公众号线 → 沿用月份范围（号名_202608.epub / 号名_202608-202609.epub）
     single_no_month = (is_non_wechat_platform(book_dir)
                        and not should_split_by_month(account, book_dir))
-    if single_no_month:
+    if account in MERGED_BY_SOURCE:
+        # 来源号合订本：文件名用「号名合集」（如 九边六镇合集.epub），不带月份
+        out_path = out_dir / ("%s.epub" % safe_stem("".join(MERGED_BY_SOURCE[account]) + "合集"))
+    elif single_no_month:
         out_path = out_dir / ("%s.epub" % safe_stem(account))
     else:
         if dates:
@@ -1441,6 +1476,8 @@ def resolve_dir(account: str) -> Path:
     目录名和文章里的号名可能不完全一致（例如目录「猫刀笔」/ 号名「猫笔刀」），
     直接新建目录会把同一号拆成两本，所以先做同义匹配再考虑新建。
     """
+    # 号名归并（陈少 2026-10-14：六镇 → 九边）
+    account = ACCOUNT_ALIASES.get(account, account)
     clean = safe_stem(account)
     direct = _books_root() / clean        # 2026-10-01 修：新号必须落在号目录根（定稿库），不能建到成品线根下
     if direct.is_dir():
@@ -1528,6 +1565,18 @@ COVER_FONT_PATH = "/Users/jessper/Library/Fonts/方正屏显臻宋.TTF"
 # 按月分册的号（陈少 2026-10-11 定）：每月独立一本 号_YYYYMM.epub，
 # 封面用米白底+屏显臻宋+大字号月份；其他号保持单本合订不变。
 SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀"}
+
+# ★ 号名归并（陈少 2026-10-14 定，特殊情况，仅此一对）：
+#   九边、六镇是两个公众号、背后同一个人。六镇的文章归档到「九边」目录下，
+#   但作者字段仍写「六镇」；出书时书名《九边六镇合集》，h1 用「九边」「六镇」
+#   两个来源号做一级分区，区内按日期排序。
+#   别名表：识别到「六镇」→ 落「九边」目录。作者保留，靠文件名/作者字段分辨来源。
+ACCOUNT_ALIASES = {"六镇": "九边"}
+
+# ★ 按「来源号」做 h1 分区的号（陈少 2026-10-14 定，特殊情况）：
+#   这些号的书不按月份分组，改按文章里的作者/号名分组。
+#   value = 分区顺序（先九边后六镇）。
+MERGED_BY_SOURCE = {"九边": ["九边", "六镇"]}
 
 # 非公众号线（知乎/小红书/微博/Twitter）的分册门槛（陈少 2026-10-13 定）：
 #   ≥ 100 篇 → 按月分册；< 100 篇 → **一个作者一本**（号名.epub，不带月份）。

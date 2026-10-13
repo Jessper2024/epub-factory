@@ -23,10 +23,10 @@ EMOJI_CLASS = "emoji"
 # 内联随文字：像真表情一样跟在句尾；大图（正文配图）不受影响，仍走 max-width:100%。
 EMOJI_CSS_RULE = """img.emoji {
   display: inline;
+  width: 2em;
+  height: 2em;
   max-width: 2em;
   max-height: 2em;
-  width: auto;
-  height: auto;
   vertical-align: text-bottom;
   margin: 0 0.1em;
 }"""
