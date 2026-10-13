@@ -2057,11 +2057,10 @@ def convert(
         cleaned_blocks: list[etree._Element] = []
         for block in blocks:
             block_text = _text_value(block)
-            # Different Notion/SingleFile exports can turn the page title into
-            # h1, h2, p, or a layout div.  The exact block text is the stable
-            # signal, so remove the duplicate title regardless of tag.
-            if block_text in {_base_title_from_source(source), _raw_title_from_source(source)} and not block.xpath(".//img"):
-                continue
+            # 陈少 2026-10-14 定：**不再删除与标题重复的首块**。
+            # 旧规则把「正文里跟标题相同的块」当搬运痕迹丢掉，但推特推文的
+            # 正文首段就是推文全文（与标题重复），这条误删了正文首段。
+            # 结论：宁可重复不可丢失——正文一字不改，全部保留。
             if block_text in notion_dates:
                 if _tag(block) == "p":
                     block.set("class", "body-text")

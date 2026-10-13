@@ -140,7 +140,9 @@ def extract(doc) -> dict:
         cls = el.get("class") or ""
         if "notion-text-block" in cls or "notion-paragraph" in cls:
             tx = clean("".join(el.itertext()))
-            if tx and tx != out["title"] and tx != seen_prev:
+            # 陈少 2026-10-14 定：**不再删与标题重复的首段**（推特推文正文=推文全文，
+            # 与标题重复，旧规则误删）。只去相邻重复，不去「标题重复」。
+            if tx and tx != seen_prev:
                 out["blocks"].append(("p", tx))
                 seen_prev = tx
         elif el.tag == "img":
