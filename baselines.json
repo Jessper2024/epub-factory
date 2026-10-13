@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T03:22:55",
-    "git": "068f1ff",
+    "updated_at": "2026-10-14T03:55:14",
+    "git": "b0368dd",
     "books": 43
   },
   "DeepSeek_202604-202609.epub": {
@@ -170,7 +170,7 @@
     "articles": 12,
     "toc": 12,
     "parts": 1,
-    "source_xhtml": 39
+    "source_xhtml": 42
   },
   "猫笔刀_202609.epub": {
     "size_mb": 4.3,
@@ -178,15 +178,15 @@
     "articles": 18,
     "toc": 19,
     "parts": 1,
-    "source_xhtml": 39
+    "source_xhtml": 42
   },
   "猫笔刀_202610.epub": {
-    "size_mb": 2.7,
+    "size_mb": 2.6,
     "months": 0,
-    "articles": 9,
-    "toc": 9,
+    "articles": 13,
+    "toc": 13,
     "parts": 1,
-    "source_xhtml": 39
+    "source_xhtml": 42
   },
   "王张三_202309-202512.epub": {
     "size_mb": 1.3,
