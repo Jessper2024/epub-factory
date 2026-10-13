@@ -42,6 +42,7 @@ STAGING = STAGING_ROOT / "ingest"               # zip 解包暂存（下划线�
 UNKNOWN_DIR = ROOT / "02、定稿库" / "_待判"
 
 import platforms as P                            # noqa: E402
+import link_index                                 # noqa: E402
 import sigi_convert as S                         # noqa: E402
 
 
@@ -152,7 +153,8 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
 
     判不出平台或作者 → 交给 to_unknown 落待判目录（陈少 2026-10-13 定：不猜）。
     """
-    from build_epub import safe_stem, find_duplicate_title, move_to_trash
+    from build_epub import (safe_stem, find_duplicate_title, move_to_trash,
+                            is_empty_shell)
 
     key, author = info["platform"], info["author"]
     if not key or not author:
@@ -160,8 +162,17 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
         to_unknown(info["path"], reason, dry_run)
         return None
 
-    # 先判重再建目录：book_dir() 会创建目录，若判重挡下就会留下空壳目录
-    # （2026-10-13 踩过：测试时留下 05、Twitter/<作者>/xhtml 空目录）。
+    # 判重两道，先链接后标题：
+    #   链接级（`_链接索引.json`）—— 同一篇不论标题怎么写都能认出来，
+    #                                是 2026-10-13 加的那道，专治"迁移版 vs Notion 原件"这类漏判
+    #   标题级（`find_duplicate_title`）—— 没有链接的老快照靠它
+    hit = link_index.find(info.get("url", ""))
+    if hit:
+        print("  ⊘ 链接已收录，跳过并清理原件：%s → %s" % (info["path"].name, hit))
+        if not dry_run:
+            move_to_trash(info["path"])
+        return None
+
     dup = find_duplicate_title(info["title"])
     if dup:
         print("  ⊘ 已在库中，跳过并清理原件：%s → %s" % (info["path"].name, dup))
@@ -185,11 +196,15 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
         return out
 
     S.convert(info["path"], out, "notion")
-    got = out.stat().st_size if out.exists() else 0
-    if got < 3000:                       # 空壳保护，跟微信线同一道闸
+    # 空壳判定看**正文字数**（不用字节数——Twitter/微博短帖正文两三百字是正常的）
+    shell, chars = is_empty_shell(out)
+    if shell:
         out.unlink(missing_ok=True)
-        print("  ✗ 转换结果疑似空壳（%d 字节），原文保留：%s" % (got, info["path"].name))
+        print("  ✗ 转换结果疑似空壳（正文仅 %d 字），原文保留：%s" % (chars, info["path"].name))
         return None
+    # 登记链接 ID：原件马上要删，之后再想补索引就没来源了
+    link_index.register(info.get("url", ""),
+                        "%s/%s/%s" % (P.PLATFORMS[key], author, out.name))
     move_to_trash(info["path"])
     print("  ✓ 归档：%s → %s/%s/" % (info["path"].name, P.PLATFORMS[key], author))
     return out

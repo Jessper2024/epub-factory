@@ -1116,7 +1116,36 @@ def sanitize_office_markup(path: Path) -> int:
 
 
 # 转换结果小于这个字节数就当空壳拒收（正常文章再短也有几 KB）
-MIN_XHTML_BYTES = 3000
+# 空壳判定：**看正文有没有内容**，不看文件多少字节。
+#
+# 为什么不能用字节数：Twitter/微博的短帖正文可能只有两三百字，
+# 转出来不到 3KB，但它不是空壳（2026-10-13 实测：Morris 那三篇被误拦）。
+# 真正的空壳是"正文一个字都没有"——那种无论文件多大都是坏的。
+MIN_BODY_CHARS = 80
+
+
+def is_empty_shell(path: Path) -> tuple[bool, int]:
+    """转出来的 XHTML 是不是空壳。返回 (是否空壳, 正文字数)。
+
+    正文取 <body> 里的纯文本长度，去掉标题与元数据行。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return True, 0
+    body = text[text.find("<body"):] if "<body" in text else text
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", body, flags=re.S | re.I)
+    plain = re.sub(r"<[^>]+>", "", body)
+    plain = re.sub(r"\s+", "", plain)
+    # 扣掉 h1 标题与 article-meta 那行的字数（它们不算正文）
+    title_len = 0
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", body, re.S)
+    if m:
+        title_len += len(re.sub(r"<[^>]+>", "", m.group(1)).strip())
+    m = re.search(r'class="article-meta"[^>]*>(.*?)<', body, re.S)
+    if m:
+        title_len += len(m.group(1).strip())
+    return len(plain) - title_len < MIN_BODY_CHARS, len(plain) - title_len
 
 
 def _cfg_bool(key: str, default: bool) -> bool:
@@ -1276,12 +1305,12 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                 if not dry_run:
                     S.convert(cleaned, dest, proc_type, False)
                     # 空壳保护：有一种快照转出来只有标题、正文一个字都没有
-                    # （2026-09-17 实测：3 篇 33-40MB 的就这样，成品 1581 字节）。
-                    # 把它当成功就等于这篇永远丢了，还会因为"已有同名"挡住以后重收。
-                    got = dest.stat().st_size if dest.exists() else 0
-                    if got < MIN_XHTML_BYTES:
-                        raise ValueError("转换结果疑似空壳（%d 字节，少于 %d）"
-                                         % (got, MIN_XHTML_BYTES))
+                    # （2026-09-17 实测：3 篇 33-40MB 的就这样）。
+                    # 判据是**正文字数**不是文件字节——短帖（Twitter/微博）
+                    # 正文两三百字、文件不到 3KB，但那是正常内容（2026-10-13 修）。
+                    shell, chars = is_empty_shell(dest)
+                    if shell:
+                        raise ValueError("转换结果疑似空壳（正文仅 %d 字）" % chars)
                     STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
                     converted = True
             except Exception:
