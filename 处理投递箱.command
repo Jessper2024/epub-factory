@@ -1,105 +1,121 @@
 #!/bin/zsh
-# 处理投递箱（带实时进度页）—— 统一入口：html 入料线 + epub 拆解线
-# 双击即可。陈少 2026-10-13 起，2026-10-14 加 epub 拆解线。
+# ═══ 学习工厂 · 唯一处理入口 ═══
+# 双击一次：起进度页 → 四线自动处理 → 装定时任务 → 刷新看板 → 推 GitHub。
+# 零交互（抓视频走对话）。
 #
-# 分流逻辑：
-#   · .epub  → mv 到 0000、原始文件/，交给 auto_pipeline.sh（拆解→推Notion→落xhtml）
-#   · .html/.zip → ingest.py（微信/Notion 入料 + 自动重建 epub）
-# 两者各自独立处理，互不干扰。epub 拆解完打印「制卡」提示。
-cd "/Users/jessper/Life/学习工厂/02、文稿成品线/_engine" || exit 1
-PY="./.venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
+# 四线：
+#   ① 文稿线  ingest.py            扫 02、文稿成品线/01、投递箱（html/zip/epub）
+#   ② 成人线  intake_dispatch.py    扫 03、成人作品集线/{演员}/01、投递箱（CSV）
+#   ③ 写真线  make_epub.py（遍历）   扫 04、写真集线/01、投递箱（图片文件夹）
+#   ④ 定时任务 + 看门狗（首次装，已装跳过）
+# 收尾：刷新全部看板 + 推 GitHub。
 
+set -uo pipefail
+PY="/Users/jessper/.workbuddy/binaries/python/envs/default/bin/python"
+FACTORY="$HOME/Life/学习工厂"
+ENGINE="$FACTORY/02、文稿成品线/_engine"
+
+echo "════════════════════════════════════════════════════"
+echo "  学习工厂 · 统一处理　$(date '+%Y-%m-%d %H:%M')"
+echo "════════════════════════════════════════════════════"
+echo
+
+# ═══ ⓪ 进度页（后台起，跑完不关）═══
 PORT=8770
-URL="http://127.0.0.1:$PORT/"
 PIDFILE="/tmp/epub-progress.pid"
-BOX="../01、投递箱"
-RAW="../04、EPUB拆解/0000、原始文件"
-AUTO_PIPELINE="$HOME/.workbuddy/skills/anki-batch-cards/scripts/auto_pipeline.sh"
-
-echo "════════════════════════════════════════════════════"
-echo "  处理投递箱　$(date '+%Y-%m-%d %H:%M')"
-echo "════════════════════════════════════════════════════"
-echo
-
-N=$(ls "$BOX" 2>/dev/null | grep -v '^\.' | wc -l | tr -d ' ')
-if [ "$N" = "0" ]; then
-  echo "投递箱是空的，没有要处理的。"
-  echo
-  echo "按回车关闭…"; read; exit 0
-fi
-
-echo "发现 $N 个待处理文件。"
-echo
-
-# ① 分流 epub：文件名繁转简（opencc）→ mv 到原始文件目录（同名跳过不覆盖）
-mkdir -p "$RAW"
-T2S="/Users/jessper/.workbuddy/binaries/python/envs/default/bin/python"
-EPUB_N=0
-for f in "$BOX"/*.epub; do
-  [ -e "$f" ] || continue
-  base=$(basename "$f")
-  # 繁转简（opencc t2s），拿简体文件名；失败则保持原名
-  sbase=$("$T2S" -c "import opencc,sys;print(opencc.OpenCC('t2s').convert(sys.argv[1]))" "$base" 2>/dev/null || echo "$base")
-  if [ "$sbase" != "$base" ] && [ -n "$sbase" ]; then
-    mv "$f" "$BOX/$sbase"
-    f="$BOX/$sbase"
-    echo "  🔤 繁转简：$base → $sbase"
-  fi
-  if [ -e "$RAW/$(basename "$f")" ]; then
-    echo "  ⏭ epub 已存在源料目录，跳过：$(basename "$f")"
-  else
-    mv "$f" "$RAW/"
-    EPUB_N=$((EPUB_N + 1))
-    echo "  📦 epub → 原始文件：$(basename "$f")"
-  fi
-done
-
-# ② 进度服务：已经在跑就复用，没跑才起（防重复双击起一堆）
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  echo "进度服务已在运行，直接复用。"
+  echo "  进度页已在运行：http://127.0.0.1:$PORT/"
 else
+  cd "$ENGINE"
   "$PY" progress_server.py --port "$PORT" > /tmp/epub-progress.log 2>&1 &
   echo $! > "$PIDFILE"
   sleep 1.2
-  echo "进度服务已启动。"
+  echo "  进度页已启动：http://127.0.0.1:$PORT/"
 fi
-echo "  进度页：$URL"
+open "http://127.0.0.1:$PORT/" 2>/dev/null
 echo
 
-# ③ 开浏览器
-open "$URL" 2>/dev/null || echo "  （没自动打开，请手动访问上面的地址）"
-sleep 0.4
-
-# ④ 跑 ingest（html 入料线，前台；终端与进度页同时能看到进展）
-echo "────────────────────────────────────────────────────"
-echo "【入料线：html / zip】"
-echo "────────────────────────────────────────────────────"
+# ═══ ① 文稿线 ═══
+echo "──────────────── ① 文稿线（html / zip / epub）────────────────"
+cd "$ENGINE"
 "$PY" ingest.py
 echo
 
-# ⑤ 跑 epub 拆解线（拆解 → 推 Notion → 落 xhtml）
-if [ "$EPUB_N" -gt 0 ]; then
-  echo "────────────────────────────────────────────────────"
-  echo "【拆解线：epub】"
-  echo "────────────────────────────────────────────────────"
-  "$AUTO_PIPELINE"
-  echo
-  echo "✓ 拆解完成。"
-  echo
-  echo "──────────── 制卡提示 ────────────"
-  echo "  拆解产物已落 04、EPUB拆解/<书名>/01、xhtml/"
-  echo "  需要制卡时，回 WorkBuddy 跟助手说「<书名> 制卡」即可。"
-  echo "────────────────────────────────────"
-  echo
+# ═══ ② 成人线 ═══
+echo "──────────────── ② 成人线（CSV）────────────────"
+ADULT="$HOME/.workbuddy/skills/edge-batch-capture/scripts/intake_dispatch.py"
+if [ -f "$ADULT" ]; then
+  "$PY" "$ADULT" 2>&1 | tail -20
+else
+  echo "  （成人线脚本不存在，跳过）"
 fi
+echo
 
-echo "✓ 全部处理完成。"
+# ═══ ③ 写真线 ═══
+echo "──────────────── ③ 写真线（图片文件夹）────────────────"
+PHOTO="$HOME/.workbuddy/skills/photobook-epub/scripts/make_epub.py"
+PHOTO_BOX="$FACTORY/04、写真集线/01、投递箱"
+PHOTO_OUT="$FACTORY/04、写真集线/02、成书"
+if [ -d "$PHOTO_BOX" ]; then
+  n=0
+  for d in "$PHOTO_BOX"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    out="$PHOTO_OUT/$name.epub"
+    if [ -f "$out" ]; then
+      continue
+    fi
+    "$PY" "$PHOTO" --input "$d" --output "$out" --title "$name" --sequencer "沪上陈少" >/dev/null 2>&1
+    if [ -f "$out" ]; then
+      echo "  ✓ 写真集：$name"
+      n=$((n+1))
+    else
+      echo "  ✗ 写真集失败：$name"
+    fi
+  done
+  echo "  写真线新出 $n 本。"
+else
+  echo "  （写真线投递箱不存在，跳过）"
+fi
 echo
-echo "进度页正在展示结果：$URL"
+
+# ═══ ④ 定时任务 + 看门狗（首次装）═══
+echo "──────────────── ④ 定时任务 / 看门狗 ────────────────"
+# 文稿线定时任务（每 4 小时自动扫投递箱）
+if launchctl print "gui/$(id -u)/com.jessper.epub-ingest" >/dev/null 2>&1; then
+  echo "  ✓ 文稿线定时任务已装，跳过。"
+else
+  cd "$ENGINE"
+  ./epub.sh ingest-auto install >/dev/null 2>&1
+  echo "  ✓ 已装文稿线定时任务（每 4 小时自动扫）。"
+fi
+# 成人线抓取看门狗（每 15 分钟巡检，卡住重启）
+WD_PLIST="$HOME/Library/LaunchAgents/com.user.crawlwatch.plist"
+if launchctl list 2>/dev/null | grep -q crawlwatch; then
+  echo "  ✓ 抓取看门狗已在运行，跳过。"
+elif [ -f "$WD_PLIST" ]; then
+  launchctl bootstrap "gui/$(id -u)" "$WD_PLIST" 2>/dev/null || launchctl load "$WD_PLIST" 2>/dev/null
+  echo "  ✓ 已加载抓取看门狗。"
+fi
 echo
-echo "按回车关闭本终端窗口…"
+
+# ═══ ⑤ 刷新看板 + 推 GitHub ═══
+echo "──────────────── ⑤ 刷新看板 + 推 GitHub ────────────────"
+"$PY" "$HOME/.workbuddy/skills/dashboard-hub/scripts/dashboard.py" 2>&1 | tail -3
+
+BOARD_DIR="$FACTORY/00、看板中枢"
+if [ -d "$BOARD_DIR/.git" ]; then
+  cd "$BOARD_DIR"
+  git add -A
+  git -c user.name="Jessper2024" -c user.email="jessper@users.noreply.github.com" \
+      commit -q -m "刷新看板 $(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null || true
+  git -c http.proxy= -c https.proxy= -c http.version=HTTP/1.1 push origin main 2>&1 | tail -1
+fi
+echo
+
+echo "════════════════════════════════════════════════════"
+echo "  ✓ 全部处理完成。进度页：http://127.0.0.1:$PORT/"
+echo "════════════════════════════════════════════════════"
+echo
+echo "按回车关闭本窗口…（进度页仍在后台，可随时刷新）"
 read
-
-echo "（进度服务仍在后台运行，方便你随时刷新页面。）
-（不想要了就在终端跑：kill \$(cat $PIDFILE)）"

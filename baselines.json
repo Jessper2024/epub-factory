@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T06:13:23",
-    "git": "2ce6208",
-    "books": 43
+    "updated_at": "2026-10-14T08:29:48",
+    "git": "ee49553",
+    "books": 45
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -31,10 +31,10 @@
   "九边六镇合集.epub": {
     "size_mb": 2.0,
     "months": 2,
-    "articles": 17,
-    "toc": 23,
+    "articles": 18,
+    "toc": 24,
     "parts": 2,
-    "source_xhtml": 17
+    "source_xhtml": 18
   },
   "互联网怪盗团_202609.epub": {
     "size_mb": 0.1,
@@ -340,6 +340,14 @@
     "parts": 1,
     "source_xhtml": 3
   },
+  "Time Horizon📊.epub": {
+    "size_mb": 0.3,
+    "months": 2,
+    "articles": 4,
+    "toc": 6,
+    "parts": 2,
+    "source_xhtml": 4
+  },
   "jasonleo.epub": {
     "size_mb": 0.0,
     "months": 2,
@@ -347,5 +355,13 @@
     "toc": 6,
     "parts": 2,
     "source_xhtml": 3
+  },
+  "xtony.epub": {
+    "size_mb": 0.5,
+    "months": 3,
+    "articles": 6,
+    "toc": 9,
+    "parts": 3,
+    "source_xhtml": 6
   }
 }

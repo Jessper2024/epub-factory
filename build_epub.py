@@ -1305,6 +1305,9 @@ def is_empty_shell(path: Path) -> tuple[bool, int]:
     body = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", body, flags=re.S | re.I)
     plain = re.sub(r"<[^>]+>", "", body)
     plain = re.sub(r"\s+", "", plain)
+    # ★ 陈少 2026-10-14：纯图片文章（正文文字少但全是图）不算空壳。
+    # 只要有真实图片（<img>），哪怕正文字数不足 MIN_BODY_CHARS 也放行。
+    img_count = len(re.findall(r"<img\b", body, re.I))
     # 扣掉 h1 标题与 article-meta 那行的字数（它们不算正文）
     title_len = 0
     m = re.search(r"<h1[^>]*>(.*?)</h1>", body, re.S)
@@ -1313,7 +1316,11 @@ def is_empty_shell(path: Path) -> tuple[bool, int]:
     m = re.search(r'class="article-meta"[^>]*>(.*?)<', body, re.S)
     if m:
         title_len += len(m.group(1).strip())
-    return len(plain) - title_len < MIN_BODY_CHARS, len(plain) - title_len
+    body_chars = len(plain) - title_len
+    if img_count > 0:
+        # 有图就不是空壳（纯图片文章）
+        return False, body_chars
+    return body_chars < MIN_BODY_CHARS, body_chars
 
 
 def _cfg_bool(key: str, default: bool) -> bool:
@@ -1540,6 +1547,13 @@ def resolve_dir(account: str) -> Path:
     """
     # 号名归并（陈少 2026-10-14：六镇 → 九边）
     account = ACCOUNT_ALIASES.get(account, account)
+    # 子串归并（陈少 2026-10-14，长期）：作者名含 tony/xtony → 归 xtony 目录。
+    # 大小写不敏感；命中即归并（作者字段保留原名，只改目录归属）。
+    alow = account.lower()
+    for sub, target in ACCOUNT_SUBSTR_MAP.items():
+        if sub in alow:
+            account = target
+            break
     clean = safe_stem(account)
     direct = _books_root() / clean        # 2026-10-01 修：新号必须落在号目录根（定稿库），不能建到成品线根下
     if direct.is_dir():
@@ -1634,6 +1648,15 @@ SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀"}
 #   两个来源号做一级分区，区内按日期排序。
 #   别名表：识别到「六镇」→ 落「九边」目录。作者保留，靠文件名/作者字段分辨来源。
 ACCOUNT_ALIASES = {"六镇": "九边"}
+
+# ★ 子串归并（陈少 2026-10-14 定，长期）：作者名**包含**某子串 → 归到目标目录。
+#   用于「同一个人不同时期改名」的场景：含 tony/xtony 的作者名（如
+#   「逍遥XTony（2分钟版）」「xTonyPro」等）都归到「xtony」目录，作者字段如实保留。
+#   （与 ACCOUNT_ALIASES 的区别：那是精确同名，这是"包含即归并"。）
+ACCOUNT_SUBSTR_MAP = {
+    "xtony": "xtony",
+    "tony": "xtony",
+}
 
 # ★ 按「来源号」做 h1 分区的号（陈少 2026-10-14 定，特殊情况）：
 #   这些号的书不按月份分组，改按文章里的作者/号名分组。
