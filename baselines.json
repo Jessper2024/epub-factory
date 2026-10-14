@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T08:29:48",
-    "git": "ee49553",
-    "books": 45
+    "updated_at": "2026-10-14T08:43:30",
+    "git": "8b90438",
+    "books": 49
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -28,12 +28,44 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "九边六镇合集.epub": {
-    "size_mb": 2.0,
-    "months": 2,
-    "articles": 18,
-    "toc": 24,
-    "parts": 2,
+  "九边_202604.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 2,
+    "toc": 2,
+    "parts": 1,
+    "source_xhtml": 18
+  },
+  "九边_202605.epub": {
+    "size_mb": 0.3,
+    "months": 0,
+    "articles": 3,
+    "toc": 3,
+    "parts": 1,
+    "source_xhtml": 18
+  },
+  "九边_202607.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 2,
+    "toc": 2,
+    "parts": 1,
+    "source_xhtml": 18
+  },
+  "九边_202608.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 4,
+    "toc": 8,
+    "parts": 1,
+    "source_xhtml": 18
+  },
+  "九边_202609.epub": {
+    "size_mb": 1.7,
+    "months": 0,
+    "articles": 7,
+    "toc": 7,
+    "parts": 1,
     "source_xhtml": 18
   },
   "互联网怪盗团_202609.epub": {
