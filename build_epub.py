@@ -2067,9 +2067,18 @@ def _source_process_type(path: Path) -> str:
     判据是**结构**，不是文件名——文件名可以随便改，结构改不了。
     Notion 导出认「notion-page-content」或「page-body」容器；
     网页存档认「entry-content」或「<base href=」（WordPress 保存网页）。
+
+    ★ 顺序很关键（2026-10-17 陈少踩坑修正）：微信文章被浏览器「另存为」后也有
+      <base href>（指向 mp.weixin.qq.com），会撞 webarchive 的 base href 特征，
+      导致整篇被判成网页存档、日期/作者走错分支。所以**先判微信**，命中微信特征
+      直接返回 wechat，后面的 webarchive 判定才轮得到真正的独立站存档。
     """
     try:
         text = _head_text(path, limit=3_000_000)
+        # 微信特征（含域名）优先：命中即 wechat，别让它落到 webarchive
+        if ('id="js_content"' in text or "mmbiz.qpic.cn" in text
+                or "mp.weixin.qq.com" in text or "activity-name" in text):
+            return "wechat"
         if "notion-page-content" in text or 'class="page-body"' in text or "page-body" in text:
             return "notion"
         if "entry-content" in text or "<base href=" in text.lower():
