@@ -1575,11 +1575,11 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                     shutil.move(str(p), str(raw_dest))
                     log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
             else:
-                # 陈少 2026-09-17 定：有 xhtml 了，原 html 就没用了，一律删。
-                p.unlink(missing_ok=True)
-                log("xhtml 已生成，原 HTML 删除：", p.name)
+                # 陈少 2026-10-17 定：有 xhtml 了，原 html 一律丢废纸篓（不留底）。
+                move_to_trash(p)
+                log("xhtml 已生成，原 HTML 丢废纸篓：", p.name)
         elif archive_original and not dry_run:
-            p.unlink(missing_ok=True)
+            move_to_trash(p)
         touched[dest_dir.name] = dest_dir
     elif suffix == ".xhtml":
         account = detect_account_from_xhtml(p) or p.parent.name

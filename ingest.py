@@ -244,7 +244,7 @@ def _overwrite_existing(info: dict, where: str, dry_run: bool) -> Path | None:
     - 只覆盖 where 指向的那一篇；文件名随新日期/标题变（旧名删）。
     - 保留投递箱原件（不删）。
     """
-    from build_epub import safe_stem
+    from build_epub import safe_stem, move_to_trash
     old = _locate_existing(where)
     if old is None:
         print("  ⚠ 覆盖更新：定位不到既有 xhtml（%s），跳过覆盖" % where)
@@ -272,14 +272,8 @@ def _overwrite_existing(info: dict, where: str, dry_run: bool) -> Path | None:
         print("  ✗ 覆盖更新：新 html 正文完全为空，放弃覆盖")
         return None
 
-    # 更新留底 html
-    # 号目录要稳定取（不能用 dest_dir.parent：dest_dir 可能是 xhtml/2022年10月/ 这种月份子目录，
-    # parent 会拿到 xhtml/，html 留底就落错到 xhtml/html/）
-    book_dir = P.book_dir(key, author)
-    html_dir = book_dir / "html"
-    html_dir.mkdir(parents=True, exist_ok=True)
-    kept = html_dir / (safe_stem(stem) + ".html")
-    shutil.copy2(info["path"], kept)      # 覆盖留底
+    # 陈少 2026-10-17 定：不留底 html，覆盖更新也不 copy，直接丢废纸篓。
+    move_to_trash(info["path"])
 
     _pg(info["path"].name, "ok", "", "%s" % book_dir.name)
     print("  ✓ 覆盖更新：%s → %s" % (info["path"].name, new_out.name[:40]))
@@ -357,17 +351,8 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
 
     TOUCHED_ACCOUNTS.add((key, author))
 
-    # ── html 原始留底（陈少 2026-10-13 定）：入料时 copy 一份，原件仍进废纸篓 ──
-    # 说明：PDF 线**暂停**（陈少 2026-10-13：PDF 暂不成熟，后续再想）。
-    # html 留底保留，将来 PDF 按需从 html/ 重出（`./epub.sh pdf`）。
-    book_dir = P.book_dir(key, author)
-    html_dir = book_dir / "html"
-    html_dir.mkdir(parents=True, exist_ok=True)
-    kept = html_dir / (safe_stem(stem) + ".html")
-    if not kept.exists():
-        shutil.copy2(info["path"], kept)
-        print("  ✓ 留底：%s/html/%s" % (P.PLATFORMS[key], kept.name[:40]))
-
+    # ── 陈少 2026-10-17 定：所有平台 html 一律不留底，处理完直接丢废纸篓 ──
+    # 原「入料时 copy 一份到 html/ 留底」已废（PDF 线暂停，后续陈少会迭代）。
     move_to_trash(info["path"])
     _pg(info["path"].name, "ok", "", "%s/%s" % (P.PLATFORMS[key], author))
     print("  ✓ 归档：%s → %s/%s/" % (info["path"].name, P.PLATFORMS[key], author))
@@ -418,14 +403,7 @@ def archive_book(info: dict, dry_run: bool = False) -> Path | None:
     # 书章节标题 h1 → h2（出版图书全 h2 平级）
     _book_add_h1_title(out)
 
-    # html 留底
-    book_dir = P.platform_dir("book") / safe_stem(book_title)
-    html_dir = book_dir / "html"
-    html_dir.mkdir(parents=True, exist_ok=True)
-    kept = html_dir / (stem + ".html")
-    if not kept.exists():
-        shutil.copy2(info["path"], kept)
-
+    # 陈少 2026-10-17 定：出版图书 html 同样不留底，处理完直接丢废纸篓。
     from build_epub import move_to_trash
     move_to_trash(info["path"])
     _pg(info["path"].name, "ok", "", "08、出版图书/%s" % book_title, section="book")
