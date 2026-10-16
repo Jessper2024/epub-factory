@@ -26,7 +26,7 @@ from core import config as C  # noqa: E402
 from core import health as H  # noqa: E402   # 系统自检（依赖/磁盘/备份/结构…）
 
 ROOT = B.ROOT
-OUT = ROOT / "_报表.html"
+OUT = ROOT / "_管理" / "_报表.html"
 
 
 def cover_thumb(book: Path, width: int = 200) -> str:
@@ -50,7 +50,7 @@ def scan_account(book: Path) -> dict:
     """一个号的完整画像。"""
     src = B.source_dir(book)
     arts = []
-    for p in sorted(src.glob("*.xhtml")):
+    for p in sorted(src.rglob("*.xhtml")):
         a = B.parse_article(p)
         if not a:
             continue
@@ -235,7 +235,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
         for d in bmirror.iterdir():
             if not d.is_dir():
                 continue
-            xs = list((d / "xhtml").glob("*.xhtml"))
+            xs = list((d / "xhtml").rglob("*.xhtml"))
             if xs:
                 bm_accounts += 1
                 bm_xhtml += len(xs)
@@ -294,7 +294,7 @@ def build_html(accounts: list[dict], now: str, live: bool = False,
             regress_detail = "%d 本已核对" % len(cur)
 
     # 处理报告
-    rp = ROOT / "_处理报告.md"
+    rp = ROOT / "_管理" / "_处理报告.md"
     report_text = rp.read_text(encoding="utf-8") if rp.exists() else "（还没跑过）"
 
     # 最近动态（代码改动记录）

@@ -27,7 +27,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-INDEX_FILE = ROOT / "_链接索引.json"
+INDEX_FILE = ROOT / "_管理" / "_链接索引.json"
 
 # 值结构：{稳定 ID: {"url": 完整原文链接, "where": "平台/作者/文件名"}}
 # 为什么存完整 url 而不只存 where（陈少 2026-10-13 定）：
@@ -90,13 +90,47 @@ def save(mapping: dict) -> None:
         pass
 
 
+def _where_file_exists(where: str) -> bool:
+    """where（平台/作者/文件名）指向的 xhtml 是否真实存在。
+
+    缺文件名（段数 < 3）或文件不存在 → False。用于判重时防「索引在、文件没了」
+    的脏数据挡住新文章入料（陈少 2026-10-15：茅台二季报被 99 条脏索引卡死）。
+    """
+    if not where:
+        return False
+    parts = where.split("/")
+    if len(parts) < 3:
+        return False
+    fname = parts[-1]
+    if not fname:
+        return False
+    # 文件名可能带/不带 -Sigil.xhtml，两种都试
+    base = fname[:-len("-Sigil.xhtml")] if fname.endswith("-Sigil.xhtml") else fname
+    from build_epub import collect_book_dirs, XHTML_SUBDIR
+    for book in collect_book_dirs():
+        xd = book / XHTML_SUBDIR
+        if not xd.is_dir():
+            continue
+        for cand in (base + "-Sigil.xhtml", base + ".xhtml", fname):
+            if (xd / cand).exists():
+                return True
+    return False
+
+
 def find(url: str) -> str:
-    """这个链接收过没有。返回已有文件的描述，没收录返回空。"""
+    """这个链接收过没有。返回已有文件的描述，没收录（或索引脏）返回空。
+
+    2026-10-15 加文件存在性校验：where 缺文件名、或指向的文件已被删，
+    就不算「已收录」，放行让新文章正常入料（否则脏索引会永久挡住）。
+    """
     lid = link_id(url)
     if not lid:
         return ""
     entry = load().get(lid)
-    return entry["where"] if entry else ""
+    if not entry:
+        return ""
+    where = entry.get("where", "")
+    return where if _where_file_exists(where) else ""
 
 
 def find_url(url: str) -> str:
@@ -111,12 +145,19 @@ def find_url(url: str) -> str:
 
 
 def register(url: str, where: str) -> bool:
-    """登记一篇：同时存稳定 ID + 完整 URL。返回是否新增（用于统计）。"""
+    """登记一篇：同时存稳定 ID + 完整 URL。返回是否新增（用于统计）。
+
+    2026-10-15 修：原逻辑「lid 已存在就不更新」会死守脏 where（缺文件名/文件已删），
+    导致文章文件明明没了、却被判「已收录」永远收不进来。现在：
+    - lid 已存在且 where 仍指向真实文件 → 不更新（正常判重）
+    - lid 已存在但 where 脏（文件没了）→ 用新 where 覆盖
+    """
     lid = link_id(url)
     if not lid:
         return False
     idx = load()
-    if lid in idx and idx[lid].get("where"):
+    existing = idx.get(lid)
+    if existing and existing.get("where") and _where_file_exists(existing["where"]):
         return False
     idx[lid] = {"url": url, "where": where}
     save(idx)

@@ -19,8 +19,10 @@ from pathlib import Path
 
 from ..pipeline import RawDoc, register
 
-# 微信文章的特征：正文容器或图床域名。命中任一即认为这是微信快照。
-MARKS = ('id="js_content"', "mmbiz.qpic.cn")
+# 微信文章的特征：正文容器、图床域名、或文章页域名。命中任一即认为这是微信快照。
+# 微信直出快照 id="js_content" 在前面；被浏览器「另存为」的存档在后面，
+# 但 mp.weixin.qq.com 在文件开头就出现，所以也加上兜底（2026-10-17 陈少定）。
+MARKS = ('id="js_content"', "mmbiz.qpic.cn", "mp.weixin.qq.com")
 
 OG_TITLE_RE = re.compile(r'og:title"\s+content="([^"]*)"')
 CT_RE = re.compile(r'var\s+ct\s*=\s*"?(\d{9,10})')

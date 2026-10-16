@@ -143,9 +143,18 @@ DEMOTE_HEADING_TEXTS = {
 }
 
 
+# 图注前缀（陈少 2026-10-14 定）：以这些开头的段落是「图片来源/图源标注」，不是标题，
+# 一律降回正文（图片来源网络公开报道 / 图片来自界面新闻报道 / 图源：xx 等）。
+DEMOTE_HEADING_PREFIXES = ("图片来源", "图片来自", "图源", "图片来源：", "图片来自：")
+
+
 def _should_demote_heading(text: str) -> bool:
-    """这行文本是否该从标题降回正文（陈少 2026-10-13 定）。"""
-    return (text or "").strip() in DEMOTE_HEADING_TEXTS
+    """这行文本是否该从标题降回正文（陈少 2026-10-13/14 定）。"""
+    t = (text or "").strip()
+    if t in DEMOTE_HEADING_TEXTS:
+        return True
+    # 图注前缀（图片来源/图片来自/图源…）不是标题
+    return t.startswith(DEMOTE_HEADING_PREFIXES)
 BOOK_CSS = """\
 html { margin: 0; padding: 0; }
 body {
@@ -503,6 +512,33 @@ def _date_text_from_source(source) -> str:
             or _date_from_timestamp_source(source))
 
 
+def _webarchive_date(source: etree._Element) -> str:
+    """网页存档的文章日期：article:published_time 优先，其次 <time datetime>。
+
+    输出「YYYY年M月D日」。取不到返回空（不猜）。
+    """
+    for xp in ('//meta[@property="article:published_time"]/@content',
+               '//time/@datetime',
+               '//meta[@itemprop="datePublished"]/@content'):
+        vals = source.xpath(xp)
+        if vals and vals[0].strip():
+            m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", vals[0].strip())
+            if m:
+                y, mo, d = m.group(1), str(int(m.group(2))), str(int(m.group(3)))
+                return f"{y}年{mo}月{d}日"
+    return ""
+
+
+# 浏览器「保存网页」的 <title> 常带「 - 站点名」或「 - 站点名文章备份」后缀，
+# 如「真抓到"大鱼"了 - 猫笔刀文章备份」。站点名在存档里等于作者名，不该进标题。
+_WEBARCHIVE_TITLE_TAIL = re.compile(r"\s*[-–—|｜]\s*[^-–—|｜]*(?:文章)?备份\s*$")
+
+
+def _clean_webarchive_title(value: str) -> str:
+    """去掉网页存档标题里的「 - 站点名（文章）备份」后缀。"""
+    return _WEBARCHIVE_TITLE_TAIL.sub("", value).strip() or value.strip()
+
+
 NOTION_TITLE_SUFFIX_RE = re.compile(r"(?:\s*[_|｜＿]\s*Notion)+\s*$", re.I)
 # 标题里带平台前缀/后缀（「知乎 - 去泰国…」「阿里白兔姐 - 小红书」）。
 # 平台已经体现在目录层级里了，不该出现在书名/正文标题里（2026-10-13 陈少要求）。
@@ -573,6 +609,8 @@ def _article_title_from_source(source: etree._Element, process_type: str = "wech
     base_title = _base_title_from_source(source)
     if process_type == "notion":
         date_text = _notion_date(_notion_property(source, "发布时间"))
+    elif process_type == "webarchive":
+        date_text = _webarchive_date(source)
     else:
         date_text = _date_text_from_source(source)
     if date_text and not base_title.startswith(f"{date_text}_"):
@@ -586,12 +624,22 @@ def _author_from_source(source: etree._Element) -> str:
     WeChat snapshots expose the visible account in ``js_author_name_text``;
     older captures use ``js_author_name``.  The first non-empty value wins so
     the filename remains stable even when both nodes are present.
+
+    WordPress 网页存档没有这些 id，作者在 ``<span class="author vcard">`` 里的
+    ``itemprop="name"`` 节点；``meta[name=author]`` 是通用兜底。
     """
 
     for element_id in ("js_author_name_text", "js_author_name"):
         value = _first_text_by_id(source, element_id)
         if value:
             return value
+    # WordPress author vcard：<span class="author ..."><... itemprop="name">猫笔刀</...></span>
+    # class 可能是 "author vcard"（author 在前）或 "entry-author author"（author 在后），
+    # 直接按 itemprop="name" 找，比猜 class 拼接稳。
+    for node in source.xpath('//*[@itemprop="name"]'):
+        val = _text_value(node).strip()
+        if val:
+            return val
     author_nodes = source.xpath('//meta[translate(@name, "AUTHOR", "author")="author"]/@content')
     return author_nodes[0].strip() if author_nodes and author_nodes[0].strip() else ""
 
@@ -624,10 +672,20 @@ def source_url(source: etree._Element, process_type: str = "wechat") -> str:
     按来源类型抽，取不到返回空（不猜）：
       wechat → og:url / msg_link（微信官网快照）
       notion → 属性表「文章链接」/ 正文链接行
+      webarchive → <base href>（浏览器存档原始地址）
     """
     ptype = _process_type(process_type)
     if ptype == "notion":
         return notion_source_url(source)
+    if ptype == "webarchive":
+        vals = source.xpath('//base/@href')
+        if vals and vals[0].strip():
+            return vals[0].strip()
+        # 兜底：canonical
+        vals = source.xpath('//link[@rel="canonical"]/@href')
+        if vals and vals[0].strip():
+            return vals[0].strip()
+        return ""
     for xp in ('//meta[@property="og:url"]/@content',
                '//link[@rel="canonical"]/@href',
                '//meta[@name="wechat:url"]/@content'):
@@ -750,8 +808,8 @@ def _process_type(value: str | None) -> str:
     """Return a supported processing mode, defaulting safely to WeChat."""
 
     value = (value or "wechat").strip().lower()
-    if value not in {"wechat", "notion", "javbus"}:
-        raise ValueError(f"不支持的处理类型：{value}（可选 wechat、notion 或 javbus）")
+    if value not in {"wechat", "notion", "javbus", "webarchive"}:
+        raise ValueError(f"不支持的处理类型：{value}（可选 wechat、notion、javbus 或 webarchive）")
     return value
 
 
@@ -1114,6 +1172,12 @@ def _filename_title_from_source(source: etree._Element, process_type: str = "wec
         # 注意「作者」是可见作者名（如"老陈"，跟公众号名差一字），只当兜底。
         account = _notion_account_name(source) or _notion_property(source, "作者")
         author = _notion_property(source, "作者")
+    elif process_type == "webarchive":
+        date_text = _webarchive_date(source)
+        # 网页存档没有 js_name/js_author_name，作者从 author vcard 取；
+        # 号名回退到作者（猫笔刀这类独立站，作者=号名）。
+        account = _author_from_source(source)
+        author = _author_from_source(source)
     else:
         date_text = _date_text_from_source(source)
         account = _account_name_from_source(source)
@@ -1167,6 +1231,20 @@ def _select_article(source: etree._Element, process_type: str = "wechat") -> etr
         page_body = source.xpath('//div[contains(@class, "page-body")]')
         if page_body:
             return page_body[0]
+
+    # WordPress 网页存档：正文在 .entry-content（或 .post-content）。
+    # 取它而不是外层 <article>——后者会把标题/作者/日期头一起带进正文。
+    if process_type == "webarchive":
+        entry = source.xpath(
+            '//*[contains(concat(" ", normalize-space(@class), " "), " entry-content ")]'
+        )
+        if entry:
+            return entry[0]
+        post = source.xpath(
+            '//*[contains(concat(" ", normalize-space(@class), " "), " post-content ")]'
+        )
+        if post:
+            return post[0]
 
     matches = source.xpath('//*[@id="js_content"]')
     if matches:
@@ -2023,6 +2101,10 @@ def convert(
         title = _javbus_title_from_source(source)
     elif process_type == "wechat":
         title = _article_title_from_source(source)
+    elif process_type == "webarchive":
+        date_text = _webarchive_date(source)
+        base_title = _clean_webarchive_title(_base_title_from_source(source))
+        title = f"{date_text}_{base_title}" if date_text else base_title
     else:
         notion_date_text = _notion_date(_notion_property(source, "发布时间"))
         base_title = _base_title_from_source(source)

@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "updated_at": "2026-10-14T08:43:30",
-    "git": "8b90438",
-    "books": 49
+    "updated_at": "2026-10-15T05:47:32",
+    "git": "3c3353b",
+    "books": 78
   },
   "DeepSeek_202604-202609.epub": {
     "size_mb": 1.5,
@@ -28,37 +28,213 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "九边_202604.epub": {
+  "九边_202302.epub": {
+    "size_mb": 0.3,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202303.epub": {
+    "size_mb": 2.7,
+    "months": 0,
+    "articles": 5,
+    "toc": 18,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202304.epub": {
+    "size_mb": 14.5,
+    "months": 0,
+    "articles": 7,
+    "toc": 12,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202305.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 4,
+    "toc": 7,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202306.epub": {
+    "size_mb": 1.7,
+    "months": 0,
+    "articles": 4,
+    "toc": 7,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202309.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 1,
+    "toc": 6,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202312.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202412.epub": {
     "size_mb": 0.0,
     "months": 0,
     "articles": 2,
     "toc": 2,
     "parts": 1,
-    "source_xhtml": 18
+    "source_xhtml": 98
   },
-  "九边_202605.epub": {
+  "九边_202501.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202502.epub": {
+    "size_mb": 0.9,
+    "months": 0,
+    "articles": 4,
+    "toc": 4,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202503.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 2,
+    "toc": 2,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202504.epub": {
+    "size_mb": 0.2,
+    "months": 0,
+    "articles": 4,
+    "toc": 11,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202505.epub": {
     "size_mb": 0.3,
+    "months": 0,
+    "articles": 6,
+    "toc": 15,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202506.epub": {
+    "size_mb": 1.8,
+    "months": 0,
+    "articles": 3,
+    "toc": 9,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202507.epub": {
+    "size_mb": 0.6,
+    "months": 0,
+    "articles": 4,
+    "toc": 7,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202508.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 6,
+    "toc": 6,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202509.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 2,
+    "toc": 3,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202510.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 2,
+    "toc": 2,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202601.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 3,
+    "toc": 4,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202602.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202603.epub": {
+    "size_mb": 0.0,
     "months": 0,
     "articles": 3,
     "toc": 3,
     "parts": 1,
-    "source_xhtml": 18
+    "source_xhtml": 98
   },
-  "九边_202607.epub": {
+  "九边_202604.epub": {
     "size_mb": 0.0,
     "months": 0,
-    "articles": 2,
-    "toc": 2,
+    "articles": 3,
+    "toc": 3,
     "parts": 1,
-    "source_xhtml": 18
+    "source_xhtml": 98
   },
-  "九边_202608.epub": {
-    "size_mb": 0.1,
+  "九边_202605.epub": {
+    "size_mb": 0.3,
     "months": 0,
     "articles": 4,
-    "toc": 8,
+    "toc": 4,
     "parts": 1,
-    "source_xhtml": 18
+    "source_xhtml": 98
+  },
+  "九边_202606.epub": {
+    "size_mb": 0.5,
+    "months": 0,
+    "articles": 6,
+    "toc": 6,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202607.epub": {
+    "size_mb": 0.9,
+    "months": 0,
+    "articles": 5,
+    "toc": 5,
+    "parts": 1,
+    "source_xhtml": 98
+  },
+  "九边_202608.epub": {
+    "size_mb": 0.7,
+    "months": 0,
+    "articles": 6,
+    "toc": 11,
+    "parts": 1,
+    "source_xhtml": 98
   },
   "九边_202609.epub": {
     "size_mb": 1.7,
@@ -66,7 +242,15 @@
     "articles": 7,
     "toc": 7,
     "parts": 1,
-    "source_xhtml": 18
+    "source_xhtml": 98
+  },
+  "九边_202610.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 98
   },
   "互联网怪盗团_202609.epub": {
     "size_mb": 0.1,
@@ -83,6 +267,14 @@
     "toc": 6,
     "parts": 1,
     "source_xhtml": 1
+  },
+  "人人都是产品经理_202610.epub": {
+    "size_mb": 6.5,
+    "months": 0,
+    "articles": 4,
+    "toc": 28,
+    "parts": 1,
+    "source_xhtml": 4
   },
   "何加盐_202209.epub": {
     "size_mb": 0.3,
@@ -196,29 +388,45 @@
     "parts": 1,
     "source_xhtml": 1
   },
-  "猫笔刀_202608.epub": {
-    "size_mb": 2.0,
+  "猫笔刀_202606.epub": {
+    "size_mb": 1.3,
     "months": 0,
-    "articles": 12,
-    "toc": 12,
+    "articles": 3,
+    "toc": 3,
     "parts": 1,
-    "source_xhtml": 43
+    "source_xhtml": 85
+  },
+  "猫笔刀_202607.epub": {
+    "size_mb": 1.4,
+    "months": 0,
+    "articles": 8,
+    "toc": 8,
+    "parts": 1,
+    "source_xhtml": 85
+  },
+  "猫笔刀_202608.epub": {
+    "size_mb": 9.0,
+    "months": 0,
+    "articles": 31,
+    "toc": 31,
+    "parts": 1,
+    "source_xhtml": 85
   },
   "猫笔刀_202609.epub": {
-    "size_mb": 4.3,
+    "size_mb": 9.5,
     "months": 0,
-    "articles": 18,
-    "toc": 19,
+    "articles": 29,
+    "toc": 30,
     "parts": 1,
-    "source_xhtml": 43
+    "source_xhtml": 85
   },
   "猫笔刀_202610.epub": {
-    "size_mb": 2.4,
+    "size_mb": 2.7,
     "months": 0,
-    "articles": 13,
-    "toc": 13,
+    "articles": 14,
+    "toc": 14,
     "parts": 1,
-    "source_xhtml": 43
+    "source_xhtml": 85
   },
   "王张三_202309-202512.epub": {
     "size_mb": 1.3,
@@ -332,6 +540,17 @@
     "parts": 1,
     "source_xhtml": 1
   },
+  "春天的木棉花.epub": {
+    "size_mb": 0.1,
+    "months": 0,
+    "articles": 1,
+    "toc": 1,
+    "parts": 1,
+    "source_xhtml": 1
+  },
+  "猫笔刀（未成书）": {
+    "source_xhtml": 0
+  },
   "秦尔迪亚.epub": {
     "size_mb": 0.0,
     "months": 2,
@@ -389,11 +608,19 @@
     "source_xhtml": 3
   },
   "xtony.epub": {
-    "size_mb": 0.5,
-    "months": 3,
-    "articles": 6,
-    "toc": 9,
-    "parts": 3,
-    "source_xhtml": 6
+    "size_mb": 2.8,
+    "months": 7,
+    "articles": 38,
+    "toc": 52,
+    "parts": 7,
+    "source_xhtml": 38
+  },
+  "交易之王.epub": {
+    "size_mb": 0.0,
+    "months": 0,
+    "articles": 14,
+    "toc": 14,
+    "parts": 1,
+    "source_xhtml": 14
   }
 }

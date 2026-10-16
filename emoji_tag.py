@@ -52,6 +52,23 @@ def image_natural_size(data_uri: str) -> tuple[int, int]:
     if raw[:6] in (b"GIF87a", b"GIF89a") and len(raw) >= 10:
         w, h = struct.unpack("<HH", raw[6:10])
         return (w, h)
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":   # WebP：三种 chunk 各有格式
+        if raw[12:16] == b"VP8X" and len(raw) >= 30:  # extended
+            # 24bit 宽-1、24bit 高-1（canvas size）
+            w = 1 + int.from_bytes(raw[24:27], "little")
+            h = 1 + int.from_bytes(raw[27:30], "little")
+            return (w, h)
+        if raw[12:16] == b"VP8 " and len(raw) >= 30:  # lossy：帧头后 0x9D012A + 2×16bit
+            if raw[23:26] == b"\x9d\x01\x2a":
+                w = struct.unpack("<H", raw[26:28])[0] & 0x3FFF
+                h = struct.unpack("<H", raw[28:30])[0] & 0x3FFF
+                return (w, h)
+        if raw[12:16] == b"VP8L" and len(raw) >= 25:  # lossless：21~24 字节位打包
+            bits = (raw[21] | raw[22] << 8 | raw[23] << 16 | raw[24] << 24)
+            w = (bits & 0x3FFF) + 1
+            h = ((bits >> 14) & 0x3FFF) + 1
+            return (w, h)
+        return (0, 0)
     if raw[:2] == b"\xff\xd8":                       # JPEG：扫 SOF 段取高宽
         i = 2
         while i + 9 < len(raw):

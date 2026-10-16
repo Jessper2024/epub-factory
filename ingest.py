@@ -50,10 +50,29 @@ import sigi_convert as S                         # noqa: E402
 # 本轮的进度对象。默认为空实现（避免各处都要判 None）。
 _PRG: "progress.Progress | None" = None
 
+# 覆盖更新模式（陈少 2026-10-14）：重复项重解析后覆盖既有 xhtml，而非删除原件。
+OVERWRITE_MODE = False
 
-def _pg(name: str, state: str, detail: str = "", target: str = "") -> None:
+
+def _pg(name: str, state: str, detail: str = "", target: str = "",
+        section: str = "article") -> None:
     if _PRG is not None:
         _PRG.set_state(name, state, detail, target)
+        # 同步进板块视图；默认「文章合集」，出版图书走「出版图书」板块
+        _PRG.section_item(section, name, state, detail, target)
+
+
+def _month_dir(dest_dir: Path, date_text: str) -> Path:
+    """按「年+月」给 dest_dir 挂一层月份子目录（陈少 2026-10-16 定，与 build_epub.month_subdir 同源）。
+
+    date_text 形如「2022年10月26日」，取不到/非标准就返回 dest_dir 原样（仍平铺）。
+    """
+    try:
+        from build_epub import month_subdir
+        msub = month_subdir(date_text)
+    except Exception:
+        msub = ""
+    return dest_dir / msub if msub else dest_dir
 
 
 def safe_unzip(zpath: Path, dest: Path) -> list[Path]:
@@ -101,6 +120,40 @@ def is_wechat_html(path: Path) -> bool:
         return False
 
 
+def _is_webarchive(path: Path) -> bool:
+    """是不是网页存档（WordPress 保存网页，如猫笔刀 maobidao.cn）。
+
+    特征：<base href> + entry-content 正文容器。复用 pipeline 的 webarchive adapter 判定。
+    """
+    if path.suffix.lower() not in (".html", ".htm"):
+        return False
+    try:
+        import core.adapters        # noqa: F401  触发注册
+        from core.pipeline import pick
+        ad = pick(path)
+        return ad is not None and ad.name == "webarchive"
+    except Exception:
+        return False
+
+
+KOODO_CONTENT_MARKER = "koodo reader - highlights"  # 与 reading_notes.py 一致（不区分大小写）
+
+
+def _looks_koodo_notes(path: Path) -> bool:
+    """是不是 Koodo 读书笔记 html（内容含「Koodo Reader - Highlights」完整标识）。
+
+    ingest 防抢跑兜底（陈少 2026-10-16 定）：读书笔记段① 本应在 ingest 之前把它搬走，
+    但万一 ingest 先扫到（时序/路径异常），认出来就跳过、不丢 _待判，交给读书笔记段处理。
+    """
+    if path.suffix.lower() != ".html":
+        return False
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return KOODO_CONTENT_MARKER in text.lower()
+
+
 def to_unknown(path: Path, reason: str, dry_run: bool) -> None:
     """判不出的文件挪到 `_待判/`，等人工处理（陈少 2026-10-13 定：不猜）。"""
     _pg(path.name, "unknown", reason)
@@ -146,6 +199,9 @@ def probe(path: Path) -> dict:
     source_label = S._notion_property(src, "来源") or S._notion_property(src, "类型")
     url = S.notion_source_url(src)
     key, reason = P.resolve_platform(source_label, url)
+    # 出版图书线（陈少 2026-10-14 定）：html 带「书名」或「Rank」属性 → 走出版图书流程。
+    book_title = (S._notion_property(src, "书名") or "").strip()
+    rank = (S._notion_property(src, "Rank") or "").strip()
     return {
         "path": path,
         "source_label": source_label,
@@ -156,11 +212,79 @@ def probe(path: Path) -> dict:
         "title": clean_title(S._base_title_from_source(src)),
         "date": S._notion_date(S._notion_property(src, "发布时间")),
         "biz": S.notion_biz(src),
+        "book_title": book_title,
+        "rank": rank,
+        "is_book": bool(book_title or rank),  # 有书名或 Rank 任一 → 出版图书
     }
 
 
 # 本次 run 归档过的号（陈少 2026-10-14：处理投递箱后要精准重建这些号的 epub）
 TOUCHED_ACCOUNTS: set[str] = set()
+
+
+def _locate_existing(where: str) -> Path | None:
+    """把 link_index/find_duplicate_title 的 where 描述定位到既有 xhtml 完整路径。
+
+    where 两种格式：`平台/作者/文件名`（link_index）或 `书目录名/文件名`（标题判重）。
+    统一处理：取最后一段当文件名，遍历所有 book_dir 找匹配。
+    源可能按「年+月」分子目录，所以用递归 rglob 而不是只查平铺层。
+    """
+    fname = where.split("/")[-1]
+    import build_epub as B
+    for book in B.collect_book_dirs():
+        for cand in B.xhtml_all(B.source_dir(book)):
+            if cand.name == fname:
+                return cand
+    return None
+
+
+def _overwrite_existing(info: dict, where: str, dry_run: bool) -> Path | None:
+    """覆盖更新：用投递箱的新 html 重新解析，覆盖既有那篇 xhtml（陈少 2026-10-14）。
+
+    - 只覆盖 where 指向的那一篇；文件名随新日期/标题变（旧名删）。
+    - 保留投递箱原件（不删）。
+    """
+    from build_epub import safe_stem
+    old = _locate_existing(where)
+    if old is None:
+        print("  ⚠ 覆盖更新：定位不到既有 xhtml（%s），跳过覆盖" % where)
+        return None
+    if dry_run:
+        print("  [预演] 会覆盖更新：%s → 重解析覆盖 %s" % (info["path"].name, old.name[:40]))
+        return old
+
+    dest_dir = old.parent
+    key, author = info["platform"], info["author"]
+    stem = "_".join(x for x in (info["date"], author, info["title"]) if x)
+    new_out = dest_dir / (safe_stem(stem) + "-Sigil.xhtml")
+
+    # 文件名变了 → 删旧文件
+    if new_out != old and old.exists():
+        old.unlink()
+        print("  · 旧文件删除（名变了）：%s" % old.name[:40])
+
+    S.convert(info["path"], new_out, "notion")
+    # 不判「空壳」：哪怕只有 1 个字也照常覆盖（陈少 2026-10-16 定）；
+    # 仅极端情况（正文完全 0 字且无图）才放弃，防空白覆盖好内容
+    from build_epub import is_empty_shell
+    shell, chars = is_empty_shell(new_out)
+    if shell and chars == 0:
+        print("  ✗ 覆盖更新：新 html 正文完全为空，放弃覆盖")
+        return None
+
+    # 更新留底 html
+    # 号目录要稳定取（不能用 dest_dir.parent：dest_dir 可能是 xhtml/2022年10月/ 这种月份子目录，
+    # parent 会拿到 xhtml/，html 留底就落错到 xhtml/html/）
+    book_dir = P.book_dir(key, author)
+    html_dir = book_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    kept = html_dir / (safe_stem(stem) + ".html")
+    shutil.copy2(info["path"], kept)      # 覆盖留底
+
+    _pg(info["path"].name, "ok", "", "%s" % book_dir.name)
+    print("  ✓ 覆盖更新：%s → %s" % (info["path"].name, new_out.name[:40]))
+    TOUCHED_ACCOUNTS.add((key, author))
+    return new_out
 
 
 def archive(info: dict, dry_run: bool = False) -> Path | None:
@@ -183,6 +307,8 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     #   标题级（`find_duplicate_title`）—— 没有链接的老快照靠它
     hit = link_index.find(info.get("url", ""))
     if hit:
+        if OVERWRITE_MODE:
+            return _overwrite_existing(info, hit, dry_run)
         _pg(info["path"].name, "dup", "链接已收录于 %s" % hit)
         print("  ⊘ 链接已收录，跳过并清理原件：%s → %s" % (info["path"].name, hit))
         if not dry_run:
@@ -191,6 +317,8 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
 
     dup = find_duplicate_title(info["title"])
     if dup:
+        if OVERWRITE_MODE:
+            return _overwrite_existing(info, dup, dry_run)
         _pg(info["path"].name, "dup", "标题重复于 %s" % dup)
         print("  ⊘ 已在库中，跳过并清理原件：%s → %s" % (info["path"].name, dup))
         if not dry_run:
@@ -198,9 +326,10 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
         return None
 
     dest_dir = P.book_dir(key, author) / "xhtml"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
     stem = "_".join(x for x in (info["date"], author, info["title"]) if x)
+    # 按「年+月」分子目录（陈少 2026-10-16 定，与微信/网页存档入料一致）
+    dest_dir = _month_dir(dest_dir, info["date"])
+    dest_dir.mkdir(parents=True, exist_ok=True)
     out = dest_dir / (safe_stem(stem) + "-Sigil.xhtml")
     if out.exists():
         _pg(info["path"].name, "dup", "目标已存在")
@@ -214,12 +343,13 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
         return out
 
     S.convert(info["path"], out, "notion")
-    # 空壳判定看**正文字数**（不用字节数——Twitter/微博短帖正文两三百字是正常的）
+    # 不判「空壳」：哪怕只有 1 个字也照常归档（陈少 2026-10-16 定）；
+    # 仅极端情况（正文完全 0 字且无图）才放弃，防空白进定稿库
     shell, chars = is_empty_shell(out)
-    if shell:
+    if shell and chars == 0:
         out.unlink(missing_ok=True)
-        _pg(info["path"].name, "fail", "疑似空壳（正文仅 %d 字）" % chars)
-        print("  ✗ 转换结果疑似空壳（正文仅 %d 字），原文保留：%s" % (chars, info["path"].name))
+        _pg(info["path"].name, "fail", "正文完全为空")
+        print("  ✗ 转换结果正文完全为空，原文保留：%s" % info["path"].name)
         return None
     # 登记链接 ID：原件马上要删，之后再想补索引就没来源了
     link_index.register(info.get("url", ""),
@@ -242,6 +372,102 @@ def archive(info: dict, dry_run: bool = False) -> Path | None:
     _pg(info["path"].name, "ok", "", "%s/%s" % (P.PLATFORMS[key], author))
     print("  ✓ 归档：%s → %s/%s/" % (info["path"].name, P.PLATFORMS[key], author))
     return out
+
+
+# 出版图书硬编码兜底（陈少 2026-10-14：第一批《交易之王》还没加书名/作者字段，先硬编码）
+BOOK_FALLBACK_TITLE = "交易之王"
+BOOK_FALLBACK_AUTHOR = "Xtony"
+
+
+def archive_book(info: dict, dry_run: bool = False) -> Path | None:
+    """归档一篇「出版图书」章节：转 XHTML → 落到 08、出版图书/<书名>/xhtml/。
+
+    规则（陈少 2026-10-14 定，长期）：
+      - 书名 = 属性「书名」（空则硬编码兜底「交易之王」）
+      - 作者 = 属性「作者」（空则兜底「Xtony」）
+      - 排序 = Rank（文件名用 rank 前缀保证顺序）
+      - 章节标题 = 原文标题（h2 平级，rank 不进 epub）
+    """
+    from build_epub import safe_stem
+
+    book_title = info.get("book_title") or BOOK_FALLBACK_TITLE
+    author = info.get("author") or BOOK_FALLBACK_AUTHOR
+    rank = info.get("rank") or "99"
+
+    # 目录 = 08、出版图书/<书名>/
+    dest_dir = P.platform_dir("book") / safe_stem(book_title) / "xhtml"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # 文件名：rank 前缀 + 标题（rank 只用于排序，不进 epub 章节名）
+    title = info["title"]
+    stem = "%02d_%s" % (int(rank) if rank.isdigit() else 99, safe_stem(title))
+    out = dest_dir / (stem + "-Sigil.xhtml")
+    if out.exists():
+        print("  ⊘ 目标已存在，跳过：%s" % out.name)
+        if not dry_run:
+            from build_epub import move_to_trash
+            move_to_trash(info["path"])
+        return None
+
+    if dry_run:
+        print("  [预演] 会归档（出版图书）：%s → %s" % (info["path"].name, out.name))
+        return out
+
+    S.convert(info["path"], out, "notion")
+
+    # 书章节标题 h1 → h2（出版图书全 h2 平级）
+    _book_add_h1_title(out)
+
+    # html 留底
+    book_dir = P.platform_dir("book") / safe_stem(book_title)
+    html_dir = book_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    kept = html_dir / (stem + ".html")
+    if not kept.exists():
+        shutil.copy2(info["path"], kept)
+
+    from build_epub import move_to_trash
+    move_to_trash(info["path"])
+    _pg(info["path"].name, "ok", "", "08、出版图书/%s" % book_title, section="book")
+    print("  ✓ 归档（出版图书）：%s → 08、出版图书/%s/" % (info["path"].name, book_title))
+
+    # 登记进重建清单（book 平台，书名作 key）
+    TOUCHED_ACCOUNTS.add(("book", book_title))
+    return out
+
+
+def _book_add_h1_title(xhtml_path: pathlib.Path) -> None:
+    """出版图书章节：把页面 <title> 提升为正文 h1 章节标题（打包时单月压平自然成 h2 层级）。
+
+    S.convert 产出的章节标题是 h3.section-title（Notion sub_header），
+    且页面 title 只写在 <title> 标签里。这里把 <title> 作为 h2 插到 body 开头，
+    并去掉正文里与章节名重复的第一个 h3.section-title。
+    """
+    from lxml import etree
+    tree = etree.parse(str(xhtml_path), etree.XMLParser(resolve_entities=False, no_network=True))
+    root = tree.getroot()
+    ns = root.tag.split("}")[0].strip("{") if "}" in root.tag else ""
+    XN = ("{%s}" % ns) if ns else ""
+    def tag(el):
+        return el.tag.split("}")[-1]
+    # 章节名 = <title>
+    title_el = root.find(".//%stitle" % XN)
+    chap = (title_el.text or "").strip() if title_el is not None else ""
+    if not chap:
+        return
+    body = root.find(".//%sbody" % XN)
+    if body is None:
+        return
+    # 在 body 开头插 h2
+    h1 = etree.SubElement(body, XN + "h1")
+    h1.text = chap
+    body.insert(0, h1)
+    # 去掉正文里第一个与章节名重复的 h3.section-title
+    for el in list(body):
+        if tag(el) == "h3" and (el.text or "").strip() == chap:
+            body.remove(el)
+            break
+    xhtml_path.write_bytes(etree.tostring(root, encoding="utf-8", xml_declaration=True))
 
 
 def handle_wechat(path: Path, dry_run: bool) -> Path | None:
@@ -303,7 +529,7 @@ def _write_run_log(started: dt.datetime, ok: int, unknown: int, skipped: int,
     （那是手动跑才写的）。没有这个文件，陈少双击后根本分不清
     "定时跑的"和"我自己跑的"、也看不到上次是什么时候（2026-10-13 陈少问）。
     """
-    log = ROOT / "_投递箱处理日志.md"
+    log = ROOT / "_管理" / "_投递箱处理日志.md"
     line = "| %s | %d | %d | %d | %s |\n" % (
         started.strftime("%Y-%m-%d %H:%M"), ok, unknown, skipped, note or "—")
     try:
@@ -323,7 +549,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="统一入料：微信 / Notion HTML / ZIP → 平台/作者")
     ap.add_argument("files", nargs="*", help="要处理的文件；不给则扫投递箱")
     ap.add_argument("--dry-run", action="store_true", help="只预演，不落地")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="覆盖更新：重复项（标题或链接命中）重解析后覆盖既有 xhtml（陈少 2026-10-14）")
     args = ap.parse_args()
+
+    # 覆盖更新模式：全局开关（archive 里判重复时用）。
+    # 同时打开 build_epub.FORCE_PROCESS —— 微信链路（_add_one）靠它实现覆盖重转，
+    # 两条链路共用同一套「重复即覆盖」语义（陈少 2026-10-14）。
+    global OVERWRITE_MODE
+    OVERWRITE_MODE = args.overwrite
+    if args.overwrite:
+        import build_epub as _B
+        _B.FORCE_PROCESS = True
 
     targets = collect_targets(args)
     started = dt.datetime.now()
@@ -362,15 +599,20 @@ def main() -> int:
             items = [t]
 
         for it in items:
-            # 形态分流：微信直取 / Notion 导出 / 都不像
+            # 形态分流：微信直取 / 网页存档 / Notion 导出 / 都不像
             if not is_notion_export(it):
-                if is_wechat_html(it):
-                    print("  形态=微信直取 → 走微信链路")
-                    _pg(it.name, "running", "微信链路")
+                if is_wechat_html(it) or _is_webarchive(it):
+                    kind = "微信直取" if is_wechat_html(it) else "网页存档"
+                    print("  形态=%s → 走文章链路" % kind)
+                    _pg(it.name, "running", "文章链路")
                     if handle_wechat(it, args.dry_run):
                         ok += 1
                     continue
-                # 既不是 Notion 也不是微信 → 交给人工
+                # 既不是 Notion 也不是微信 → 先查是不是 Koodo 读书笔记（防抢跑兜底，陈少 2026-10-16 定）
+                if _looks_koodo_notes(it):
+                    print("  形态=Koodo 读书笔记（内容含 Koodo Reader - Highlights），跳过——交由读书笔记段处理")
+                    _pg(it.name, "skip", "Koodo 读书笔记，交由读书笔记段")
+                    continue
                 print("  形态=认不出（既不是 Notion 导出，也不像微信文章）")
                 to_unknown(it, "不是可识别的微信/Notion 文章", args.dry_run)
                 unknown += 1
@@ -381,7 +623,13 @@ def main() -> int:
                   % (info["source_label"] or "—", (info["url"] or "—")[:24],
                      P.PLATFORMS.get(info["platform"], "（认不出）"), info["platform_reason"]))
             print("  作者=%-12s 标题=%s" % (info["author"] or "（认不出）", info["title"][:40]))
-            if archive(info, args.dry_run):
+            if info.get("is_book"):
+                # 出版图书线：有「书名」或「Rank」属性 → 走出版图书归档
+                print("  类型=出版图书（书名=%s rank=%s）" % (info.get("book_title") or "（空）",
+                      info.get("rank") or "（空）"))
+                if archive_book(info, args.dry_run):
+                    ok += 1
+            elif archive(info, args.dry_run):
                 ok += 1
             elif not info["platform"] or not info["author"]:
                 unknown += 1

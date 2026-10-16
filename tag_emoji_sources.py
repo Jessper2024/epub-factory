@@ -65,7 +65,7 @@ def main() -> int:
     files = changed = tagged = css_n = 0
     for d in B.collect_book_dirs():
         xd = B.source_dir(d)
-        for p in sorted(xd.glob("*.xhtml")):
+        for p in sorted(xd.rglob("*.xhtml")):
             files += 1
             n, css_changed, _wrote = process_file(p, args.dry_run)
             if n or css_changed:

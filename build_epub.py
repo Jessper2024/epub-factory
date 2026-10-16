@@ -212,6 +212,15 @@ PURE_NUMBER_HEADING_RE = re.compile(
     r'^[0-9一二三四五六七八九十]{1,3}\s*[、.．:：]?\s*$'
 )
 
+# 图注前缀（陈少 2026-10-14 定）：以这些开头的段落是「图片来源/图源标注」，不是标题
+DEMOTE_HEADING_PREFIXES = ("图片来源", "图片来自", "图源")
+
+
+def _is_demote_text(text: str) -> bool:
+    """标题降级判断：精确名单 + 图注前缀。与 sigi_convert._should_demote_heading 一致。"""
+    t = (text or "").strip()
+    return t in DEMOTE_HEADING_TEXTS or t.startswith(DEMOTE_HEADING_PREFIXES)
+
 # 转换器漏判的序号小标题。微信同一公众号的文章模板不统一：
 # 有的写 <h5>01</h5>（能识别），有的写 <section>01</section> / <p>03</p>（纯文本，判不出来）。
 # 只对「独立成块 + 无图片 + 无子块 + 序号开头 + 简短」的块提升为 h3。
@@ -279,7 +288,7 @@ def normalize_headings(nodes: list) -> int:
             is_caption = bool(sub.xpath('ancestor-or-self::*[@data-caption]'))
             # 小红书导出会把「文章中收集到的图片链接」这类说明标成 h3；
             # 命中降级名单的一律回 <p>，不进目录（陈少 2026-10-13 定）。
-            if text in DEMOTE_HEADING_TEXTS:
+            if _is_demote_text(text):
                 new = "p"
                 # 同时摘掉 section-title 类，否则 <p> 仍套标题样式（陈少 2026-10-13）
                 cls = (sub.get("class") or "")
@@ -311,7 +320,7 @@ def normalize_headings(nodes: list) -> int:
             if sub.xpath('ancestor-or-self::*[@data-caption]'):
                 continue
             sub_text = "".join(sub.itertext()).strip()
-            if sub_text in DEMOTE_HEADING_TEXTS:
+            if _is_demote_text(sub_text):
                 continue                      # 说明文字不该被抬成标题
             if looks_like_heading(sub_text):
                 sub.tag = f"{{{XHTML_NS}}}h3"
@@ -376,7 +385,13 @@ def parse_meta_row(text: str):
         and not DATE_IN_TEXT_RE.search(p)
         and not re.fullmatch(r"[\d:年月日/\s]+", p)   # 含 / 斜杠日期（2025/05/16）
     ]
-    author = names[0] if len(names) >= 2 else ""
+    # IP 属地（第三词以后，如「广东」「新加坡」）忽略——只取前两个名字
+    # （作者、号名）。2026-10-14 修：原来没截断，「广东」被当成了号名。
+    names = names[:2]
+    # 第一个名字永远是作者（公众号「作者·号名·日期」作者在第一；
+    # Twitter/Notion「作者·日期」作者也在第一）。单名时号名=作者
+    # （2026-10-14 修：原先把单名只当号名，Twitter 的作者就丢了）。
+    author = names[0] if names else ""
     account = names[1] if len(names) >= 2 else (names[0] if names else "")
     date = None
     for p in parts:
@@ -442,15 +457,18 @@ def parse_article(path: Path) -> Article | None:
         account = parts[1]
         author = parts[2]
     elif len(parts) == 3 and DATE_IN_TEXT_RE.match(parts[0]):
-        # 3 段式（日期_作者_标题，知乎/Twitter 等非公众号）：作者取第 2 段
+        # 3 段式（日期_号名/作者_标题）：第 2 段既是号名也是作者（非公众号号名=作者）
         author = parts[1]
+        account = parts[1]
     if not account:
         account = m_account
-    if not author:
+    # ★ 作者以 meta 行（「作者」属性）为准（陈少 2026-10-14 定）：Notion 导出的
+    #   文档都有「作者」属性，转换期已写进 article-meta 行。文件名拆分不可靠
+    #   （标题含下划线会拆散），只做 meta 行缺作者时的兜底。
+    if m_author:
         author = m_author
-    # 号名 → 作者覆盖（陈少 2026-10-14，长期）：六镇文章作者统一显示「六镇」。
-    if account in ACCOUNT_AUTHOR_MAP:
-        author = ACCOUNT_AUTHOR_MAP[account]
+    elif not author:
+        author = m_author  # m_author 空，保持文件名拆分的 author
 
     # 防御：作者被误判成标题（如「吹警校」那种尾部 `_` 空段 bug）会静默写错。
     # 作者若等于标题、或等于标题的净化版，说明抽取失败——报出来而不是硬写。
@@ -512,7 +530,7 @@ def strip_promo_from_html(src: Path) -> tuple[Path, int, list]:
 # 号名能改，biz 不能，所以它比号名可靠。2026-09-17 靠它救回 14 篇"未识别"的晚点文章。
 _BIZ_RE = re.compile(r'biz:\s*""\s*\|\|\s*"([A-Za-z0-9=+/]+)"')
 _BIZ_URL_RE = re.compile(r"__biz=([A-Za-z0-9=+/]+)")
-BIZ_MAP_FILE = ROOT / "_号biz映射.json"
+BIZ_MAP_FILE = ROOT / "_管理" / "_号biz映射.json"
 
 
 def biz_of(path: Path) -> str:
@@ -595,6 +613,12 @@ def detect_account_from_html(path: Path) -> str:
         if S._notion_property(src, "来源"):
             return (S._notion_account_name(src)
                     or S._notion_property(src, "作者").strip())
+        # 网页存档（WordPress）：号名 = 作者（author vcard 里的 itemprop=name）。
+        # 猫笔刀这类独立站，作者名就是号名。
+        if _source_process_type(path) == "webarchive":
+            author = S._author_from_source(src)
+            if author:
+                return author
     except Exception as exc:
         log("  识别公众号失败：", exc)
     return load_biz_map().get(biz_of(path), "")
@@ -718,32 +742,39 @@ def build_nav(months: list[tuple[str, str, list[Article]]], anchor_ids: dict[int
                            attrib={f"{{{EPUB_NS}}}type": "toc", "id": "toc"})
     elem(nav, "h1", text=book_title)
     ol = elem(nav, "ol")
+    # href 要相对 nav.xhtml 自己所在目录（OEBPS/Text/）：file_of_month 存的是
+    # 「Text/part001.xhtml」（相对 OPF 根，供 ncx 用），这里要剥掉 "Text/" 前缀。
+    # 否则 Kobo 解析成 Text/Text/part001.xhtml → 404 → 点目录条目回落到封面
+    # （陈少 2026-10-15 反馈：Kobo 点目录跳封面；木下凛凛子那套 nav 在 OEBPS/ 根没这问题）。
+    def _rel(href: str) -> str:
+        return href[len("Text/"):] if href.startswith("Text/") else href
+
     if single:
         # 单月分册本：压平月份层，文章标题直接列在书名下
         month_key, _, arts = months[0]
         for art in arts:
             sli = elem(ol, "li")
             elem(sli, "a", text=art.heading,
-                 attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+                 attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), anchor_ids[id(art)])})
             if art.subsections:
                 third = elem(sli, "ol")
                 for sid, text in art.subsections:
                     elem(elem(third, "li"), "a", text=text,
-                         attrib={"href": "%s#%s" % (file_of_month[month_key], sid)})
+                         attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), sid)})
     else:
         for month_key, label, arts in months:
             li = elem(ol, "li")
-            elem(li, "a", text=label, attrib={"href": file_of_month[month_key]})
+            elem(li, "a", text=label, attrib={"href": _rel(file_of_month[month_key])})
             sub = elem(li, "ol")
             for art in arts:
                 sli = elem(sub, "li")
                 elem(sli, "a", text=art.heading,
-                     attrib={"href": "%s#%s" % (file_of_month[month_key], anchor_ids[id(art)])})
+                     attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), anchor_ids[id(art)])})
                 if art.subsections:
                     third = elem(sli, "ol")
                     for sid, text in art.subsections:
                         elem(elem(third, "li"), "a", text=text,
-                             attrib={"href": "%s#%s" % (file_of_month[month_key], sid)})
+                             attrib={"href": "%s#%s" % (_rel(file_of_month[month_key]), sid)})
     return root
 
 
@@ -871,7 +902,7 @@ def build_opf(book_title: str, author: str, uid: str, items: list[tuple[str, str
 def years_in(book_dir: Path) -> list[int]:
     """该号源文件覆盖了哪些年份（决定是否分册）。"""
     years = set()
-    for f in source_dir(book_dir).glob("*.xhtml"):
+    for f in xhtml_all(source_dir(book_dir)):
         m = DATE_RE.match(f.stem.replace("-Sigil", ""))
         if m:
             years.add(int(m.group(1)))
@@ -889,7 +920,7 @@ def build_all(account: str, book_dir: Path, split_year: bool = False) -> list[Pa
     if should_split_by_month(account, book_dir):
         src_dir = source_dir(book_dir)
         keys: set[str] = set()
-        for p in sorted(src_dir.glob("*.xhtml")):
+        for p in xhtml_all(src_dir):
             m = DATE_RE.match(p.stem.replace("-Sigil", ""))
             if m:
                 keys.add("%04d-%02d" % (int(m.group(1)), int(m.group(2))))
@@ -921,7 +952,7 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     out_dir = book_dir
     # 先把源 xhtml 里误判的标题降级，保证源文件与合订 EPUB 一致
     tidy_sources(book_dir)
-    files = sorted(p for p in src_dir.glob("*.xhtml") if p.is_file())
+    files = xhtml_all(src_dir)
     arts: list[Article] = []
     for p in files:
         art = parse_article(p)
@@ -931,7 +962,13 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
         log("  %s：没有可用文章，跳过" % account)
         return None
 
-    arts.sort(key=lambda a: a.sort_key)
+    # 出版图书（08、出版图书/）：章节无日期，按文件名（rank 前缀）排序，
+    # 不是标题字符串序（否则「10.」会排到「2.」前面）。
+    is_book = book_dir.parent.name == "08、出版图书"
+    if is_book:
+        arts.sort(key=lambda a: a.path.stem)
+    else:
+        arts.sort(key=lambda a: a.sort_key)
 
     # 分组键：默认按月；「按来源号分区」的号（九边六镇合集）改按作者/号名分组
     # （陈少 2026-10-14 定：九边、六镇两个号合一本，h1 用来源号做一级目录）。
@@ -976,7 +1013,10 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
         for art in group:
             counter[0] += 1
             anchor_ids[id(art)] = "art%04d" % counter[0]
-            # 文内 h3 小标题：分配唯一 id 并登记进三级目录
+            # 文内 h3 小标题：分配唯一 id 并登记进三级目录。
+            # 出版图书（is_book）跳过：书的目录只列章节（h1），不列文内小标题（陈少 2026-10-14 定）。
+            if is_book:
+                continue
             for node in art.nodes:
                 for sub in node.iter():
                     if lname(sub) == "h3":
@@ -1006,6 +1046,9 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     else:
         book_title = (account + " " + span).strip() if span else account
         author = account  # 图书作者 = 公众号博主，不是文章里的笔名（如 moomoocat）
+        # 出版图书线（陈少 2026-10-14）：作者硬编码 Xtony，后续加「作者」字段再改读字段。
+        if is_book:
+            author = BOOK_AUTHOR
 
     out_dir.mkdir(parents=True, exist_ok=True)
     # 命名规则（陈少 2026-10-13 定）：
@@ -1230,7 +1273,7 @@ def publish_blocked(book_dir: Path) -> str | None:
     if any(book_dir.glob("*.epub")):
         return None
     src = source_dir(book_dir)
-    n = len([p for p in src.glob("*.xhtml") if p.is_file()])
+    n = len(xhtml_all(src))
     if n >= MIN_PUBLISH:
         return None
     return "源 %d 篇，未达成书门槛 %d 篇（差 %d 篇）" % (n, MIN_PUBLISH, MIN_PUBLISH - n)
@@ -1366,7 +1409,7 @@ def find_duplicate_title(title: str) -> str:
         xd = book / XHTML_SUBDIR
         if not xd.is_dir():
             continue
-        for f in xd.glob("*.xhtml"):
+        for f in xhtml_all(xd):
             stem = f.name[:-len("-Sigil.xhtml")] if f.name.endswith("-Sigil.xhtml") else f.stem
             seg = stem.split("_")
             t = "_".join(seg[3:]) if len(seg) > 3 else (seg[2] if len(seg) > 2 else seg[-1])
@@ -1435,10 +1478,22 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
         date_text, base = title.split("_", 1) if "_" in title else ("", title)
         if proc_type == "notion":
             author = S._notion_property(src, "作者").strip()
+        elif proc_type == "webarchive":
+            # 网页存档没有 js_author_name，作者从 author vcard 取；
+            # 号名也回退到作者（猫笔刀这类独立站，作者=号名）。
+            author = S._author_from_source(src)
+            if account == "未识别号" and author:
+                account = author
         else:
             author = S._first_text_by_id(src, "js_author_name") or S._author_from_source(src)
-        stem = "_".join(x for x in (date_text, account, author, base) if x)
+        # 号名段用归并名（含 tony→xtony），作者段如实保留——否则文件名里的变体号名
+        # 会在 rebuild 时被 parse_article 读回，又把 xtony 拆成多本（陈少 2026-10-14 踩过）。
+        stem = "_".join(x for x in (date_text, merge_account(account), author, base) if x)
         target_dir = source_dir(dest_dir)
+        # 按「年+月」分子目录（陈少 2026-10-16 定）：日期取不到就仍放平铺层
+        msub = month_subdir(date_text)
+        if msub:
+            target_dir = target_dir / msub
         converted = False
         dest = target_dir / (S.output_stem_for_title(stem) + "-Sigil.xhtml")
         dup = find_duplicate_title(base)
@@ -1459,45 +1514,45 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                 log("⚠️ 强制处理：覆盖已有同名 xhtml：", dest.name)
                 if not dry_run:
                     dest.unlink(missing_ok=True)
+                # 删完继续往下走转换（2026-10-14 修：原先卡在 else 里，删了不重转）
             else:
                 STATS["trashed"].append("%s（已有同名 xhtml，丢废纸篓）" % dest.name)
                 log("⚠️ 已存在，丢废纸篓：", dest.name, "←", p.name)
                 if not dry_run:
                     move_to_trash(p)
                 return
-        else:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            cleaned, n_promo, img_entries = strip_promo_from_html(p)
-            n_office = sanitize_office_markup(cleaned)
-            if n_office:
-                log("  清理 Word 残留标签 %d 处" % n_office)
-            STATS["promo"] += n_promo
-            # 记账：本文用到的图片，供 promo.py 判断哪些是跨文章的固定推广图
-            for fid in PROMO.record(account, img_entries):
-                STATS["promo_candidates"].append(
-                    "%s（%s）" % (fid[:16] + "…", account))
-            try:
-                log("转换：%s → %s/%s/%s" % (
-                    p.name, dest_dir.name, XHTML_SUBDIR,
-                    "（删推广图 %d 张）" % n_promo if n_promo else ""))
-                if not dry_run:
-                    S.convert(cleaned, dest, proc_type, False)
-                    # 空壳保护：有一种快照转出来只有标题、正文一个字都没有
-                    # （2026-09-17 实测：3 篇 33-40MB 的就这样）。
-                    # 判据是**正文字数**不是文件字节——短帖（Twitter/微博）
-                    # 正文两三百字、文件不到 3KB，但那是正常内容（2026-10-13 修）。
-                    shell, chars = is_empty_shell(dest)
-                    if shell:
-                        raise ValueError("转换结果疑似空壳（正文仅 %d 字）" % chars)
-                    STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
-                    converted = True
-            except Exception:
-                # 失败就别留下半成品：留着会被下一次判成"已有同名"永远跳过
-                dest.unlink(missing_ok=True)
-                raise
-            finally:
-                if cleaned != p:
-                    cleaned.unlink(missing_ok=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        cleaned, n_promo, img_entries = strip_promo_from_html(p)
+        n_office = sanitize_office_markup(cleaned)
+        if n_office:
+            log("  清理 Word 残留标签 %d 处" % n_office)
+        STATS["promo"] += n_promo
+        # 记账：本文用到的图片，供 promo.py 判断哪些是跨文章的固定推广图
+        for fid in PROMO.record(account, img_entries):
+            STATS["promo_candidates"].append(
+                "%s（%s）" % (fid[:16] + "…", account))
+        try:
+            log("转换：%s → %s/%s/%s" % (
+                p.name, dest_dir.name, XHTML_SUBDIR,
+                "（删推广图 %d 张）" % n_promo if n_promo else ""))
+            if not dry_run:
+                S.convert(cleaned, dest, proc_type, False)
+                # 空壳保护：有一种快照转出来只有标题、正文一个字都没有
+                # （2026-09-17 实测：3 篇 33-40MB 的就这样）。
+                # 判据是**正文字数**不是文件字节——短帖（Twitter/微博）
+                # 正文两三百字、文件不到 3KB，但那是正常内容（2026-10-13 修）。
+                shell, chars = is_empty_shell(dest)
+                if shell:
+                    raise ValueError("转换结果疑似空壳（正文仅 %d 字）" % chars)
+                STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
+                converted = True
+        except Exception:
+            # 失败就别留下半成品：留着会被下一次判成"已有同名"永远跳过
+            dest.unlink(missing_ok=True)
+            raise
+        finally:
+            if cleaned != p:
+                cleaned.unlink(missing_ok=True)
         # 只有真出了新的 XHTML 才动原件。转换被「已存在」挡下说明这是重复件。
         if not dry_run and converted:
             # 原件要删了，先把判重指纹和 biz 记下来：删完就再也算不出这些，
@@ -1509,8 +1564,13 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
                 raw_dir.mkdir(parents=True, exist_ok=True)
                 raw_dest = raw_dir / p.name
                 if raw_dest.exists():
-                    log("原 HTML 已备份过，删除收件箱副本：", p.name)
-                    p.unlink()
+                    # 覆盖更新模式（FORCE_PROCESS）：原件保留，不删收件箱副本（陈少 2026-10-14）
+                    if FORCE_PROCESS:
+                        shutil.copy2(str(p), str(raw_dest))    # 刷新留底，原件留着
+                        log("覆盖更新：原件保留、留底已刷新：", p.name)
+                    else:
+                        log("原 HTML 已备份过，删除收件箱副本：", p.name)
+                        p.unlink()
                 else:
                     shutil.move(str(p), str(raw_dest))
                     log("原 HTML 备份 → %s/%s/" % (dest_dir.name, RAW_SUBDIR))
@@ -1525,13 +1585,17 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
         account = detect_account_from_xhtml(p) or p.parent.name
         dest_dir = resolve_dir(account)
         target_dir = source_dir(dest_dir)
+        # 按「年+月」分子目录：从文件名第一段（日期）提取月份（陈少 2026-10-16 定）
+        msub = month_subdir(p.name)
+        if msub:
+            target_dir = target_dir / msub
         dest = target_dir / p.name
         if dest.exists():
             STATS["skipped"].append("%s（已有同名）" % dest.name)
             log("已存在，跳过：", dest.name)
         else:
             target_dir.mkdir(parents=True, exist_ok=True)
-            log("归档：%s → %s/%s/" % (p.name, dest_dir.name, XHTML_SUBDIR))
+            log("归档：%s → %s/%s/%s" % (p.name, dest_dir.name, XHTML_SUBDIR, msub or ""))
             if not dry_run:
                 shutil.copy2(p, dest)
                 STATS["added"].append("%s / %s" % (dest_dir.name, dest.name))
@@ -1542,21 +1606,29 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
 
 
 # ---------------------------------------------------------------- 入口
+def merge_account(account: str) -> str:
+    """号名归并（唯一实现，入料归档 + 出书两处共用，2026-10-14 定）。
+
+    1. 精确别名（六镇→九边、龙虎榜三板斧→猫笔刀）
+    2. 子串归并（作者名含 tony/xtony → xtony，大小写不敏感）
+    只改目录归属，作者字段/文件名里的作者段如实保留（前端展示一律原名）。
+    """
+    account = ACCOUNT_ALIASES.get(account, account)
+    alow = account.lower()
+    for sub, target in ACCOUNT_SUBSTR_MAP.items():
+        if sub in alow:
+            return target
+    return account
+
+
 def resolve_dir(account: str) -> Path:
     """把识别出的号名映射到号目录根下已存在的目录。
 
     目录名和文章里的号名可能不完全一致（例如目录「猫刀笔」/ 号名「猫笔刀」），
     直接新建目录会把同一号拆成两本，所以先做同义匹配再考虑新建。
     """
-    # 号名归并（陈少 2026-10-14：六镇 → 九边）
-    account = ACCOUNT_ALIASES.get(account, account)
-    # 子串归并（陈少 2026-10-14，长期）：作者名含 tony/xtony → 归 xtony 目录。
-    # 大小写不敏感；命中即归并（作者字段保留原名，只改目录归属）。
-    alow = account.lower()
-    for sub, target in ACCOUNT_SUBSTR_MAP.items():
-        if sub in alow:
-            account = target
-            break
+    # 号名归并（唯一实现 merge_account，六镇→九边 / 含tony→xtony）
+    account = merge_account(account)
     clean = safe_stem(account)
     direct = _books_root() / clean        # 2026-10-01 修：新号必须落在号目录根（定稿库），不能建到成品线根下
     if direct.is_dir():
@@ -1632,6 +1704,29 @@ def source_dir(book_dir: Path) -> Path:
     return sub                                # 新号 / 空目录：用标准结构
 
 
+def xhtml_all(src_dir: Path) -> list[Path]:
+    """该号 XHTML 目录里的**全部**文稿（含「年+月」子目录，2026-10-16 陈少定）。
+
+    分目录后 `glob("*.xhtml")` 只读得到平铺层、漏掉月份子目录里的文章，
+    所以读文章一律走这里（递归）。排序按文件名（日期前缀），跨目录也按时间正序。
+    """
+    return sorted(p for p in src_dir.rglob("*.xhtml") if p.is_file())
+
+
+_MONTH_KEY_RE = re.compile(r"^(\d{4})年(\d{1,2})月")
+
+
+def month_subdir(date_text: str) -> str:
+    """从「2022年10月26日」这种日期前缀里提取「2022年10月」做月份子目录名。
+
+    取不到（日期为空/非标准）返回空串，调用方就不分子目录、仍放平铺层。
+    """
+    m = _MONTH_KEY_RE.match((date_text or "").strip())
+    if not m:
+        return ""
+    return f"{m.group(1)}年{int(m.group(2))}月"
+
+
 COVER_FONTS = (
     "/System/Library/Fonts/STHeiti Medium.ttc",
     "/System/Library/Fonts/STHeiti Light.ttc",
@@ -1650,7 +1745,13 @@ SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀", "九边"}
 #   但作者字段仍写「六镇」；出书时书名《九边六镇合集》，h1 用「九边」「六镇」
 #   两个来源号做一级分区，区内按日期排序。
 #   别名表：识别到「六镇」→ 落「九边」目录。作者保留，靠文件名/作者字段分辨来源。
-ACCOUNT_ALIASES = {"六镇": "九边"}
+ACCOUNT_ALIASES = {
+    "六镇": "九边",
+    # 龙虎榜三板斧 = 猫笔刀同一个人（陈少 2026-10-14 定）
+    "龙虎榜三板斧": "猫笔刀",
+    # 猫老师脚气害我口腔溃疡2号 = 主号同一个人（陈少 2026-10-16 定）
+    "猫老师脚气害我口腔溃疡2号": "猫老师脚气害我口腔溃疡",
+}
 
 # ★ 子串归并（陈少 2026-10-14 定，长期）：作者名**包含**某子串 → 归到目标目录。
 #   用于「同一个人不同时期改名」的场景：含 tony/xtony 的作者名（如
@@ -1661,11 +1762,10 @@ ACCOUNT_SUBSTR_MAP = {
     "tony": "xtony",
 }
 
-# ★ 号名 → 作者字段覆盖（陈少 2026-10-14 定，长期）：
-#   某些号合并后，作者字段不用笔名、改用号名显示。
-#   例：六镇并入九边后，六镇文章作者显示「六镇」（而非笔名「跑哥的自留地」）。
-ACCOUNT_AUTHOR_MAP = {
-    "六镇": "六镇",
+# ★ 号名显示映射（陈少 2026-10-14）：封面/书名显示用规范名，目录名保持小写归并。
+#   xtony 目录（小写）→ 封面显示「XTony」（X 大写 + Tony 首字母大写）。
+ACCOUNT_DISPLAY_MAP = {
+    "xtony": "XTony",
 }
 
 # ★ 按「来源号」做 h1 分区的号（陈少 2026-10-14 定，特殊情况）：
@@ -1674,6 +1774,9 @@ ACCOUNT_AUTHOR_MAP = {
 # 已废弃（陈少 2026-10-14 改）：九边六镇不再做 h1 来源分区，六镇按时间并入九边时间线，
 # 九边改按月分册（见 SPLIT_MONTH_ACCOUNTS）。留空，机制保留备用。
 MERGED_BY_SOURCE = {}
+
+# 出版图书线作者（陈少 2026-10-14，第一批《交易之王》硬编码，后续改读「作者」字段）
+BOOK_AUTHOR = "Xtony"
 
 # 非公众号线（知乎/小红书/微博/Twitter）的分册门槛（陈少 2026-10-13 定）：
 #   ≥ 100 篇 → 按月分册；< 100 篇 → **一个作者一本**（号名.epub，不带月份）。
@@ -1702,7 +1805,7 @@ def should_split_by_month(account: str, book_dir: Path) -> bool:
     其它平台：篇数 ≥ PLATFORM_MONTH_SPLIT_MIN 才按月，否则一个作者一本。
     """
     if is_non_wechat_platform(book_dir):
-        n = len(list(source_dir(book_dir).glob("*.xhtml")))
+        n = len(xhtml_all(source_dir(book_dir)))
         return n >= PLATFORM_MONTH_SPLIT_MIN
     return account in SPLIT_MONTH_ACCOUNTS
 
@@ -1742,16 +1845,20 @@ def render_cover(account: str, platform: str, month: str = "") -> bytes:
     import io
 
     W, H = 1200, 1600
-    BG, INK, SUB, LINE = "#f7f5f0", "#1a1a1a", "#6b6357", "#c9c2b5"
+    BG, INK, SUB, LINE = "#f7f5f0", "#1a1a1a", "#8a8172", "#c9c2b5"
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
+    # 号名显示映射（xtony → XTony）
+    account = ACCOUNT_DISPLAY_MAP.get(account, account)
+
     # 量每段：超宽自动缩字号（绝不溢出，Kindle 裁边就废了），并取真实字高
-    entries = [(account, 96, INK, 0.84)]
+    # 排版（陈少 2026-10-14 调优）：号名是主体、字号大；平台是次要信息、字号小。
+    entries = [(account, 128, INK, 0.82)]
     if platform:
-        entries.append((platform, 104, SUB, 0.84))
+        entries.append((platform, 56, SUB, 0.82))
     if month:
-        entries.append((month, 88, SUB, 0.80))
+        entries.append((month, 56, SUB, 0.80))
 
     measured = []
     for text, size, fill, mw in entries:
@@ -1766,8 +1873,8 @@ def render_cover(account: str, platform: str, month: str = "") -> bytes:
         measured.append((text, f, fill, box[3] - box[1], box))
 
     # 整体垂直居中：总高 = 各段真实字高 + 段间净空，再定起点
-    GAP = 110                                   # 段与段之间的净空
-    LINE_AT = 55                                # 分隔线距上一段字底（落在净空里）
+    GAP = 130                                   # 段与段之间的净空（号名大，间距放宽）
+    LINE_AT = 65                                # 分隔线距上一段字底（落在净空里）
     n = len(measured)
     total = sum(m[3] for m in measured) + GAP * (n - 1)
     # 视觉重心略高于正中（陈少 2026-10-13）：纯几何居中看起来会偏下，
@@ -1804,6 +1911,9 @@ def platform_label(book_dir: Path) -> str:
         for d in _PLATFORM_DIRS:
             if name == d:
                 label = d.split("、", 1)[-1]
+                # 出版图书封面不印平台名（陈少 2026-10-14：只留书名/作者）
+                if label == "出版图书":
+                    return ""
                 return label
     return ""
 
@@ -1853,7 +1963,7 @@ def tidy_sources(book_dir: Path) -> int:
     与 parse_article 的判定保持同一套规则，避免源文件和合订本不一致。
     """
     changed_total = 0
-    for path in sorted(source_dir(book_dir).glob("*.xhtml")):
+    for path in xhtml_all(source_dir(book_dir)):
         try:
             tree = etree.parse(str(path), etree.XMLParser(resolve_entities=False, no_network=True))
         except Exception:
@@ -1893,7 +2003,7 @@ EXTRA_SOURCES = [WATCH_DIR]
 
 # 「可安全清理」只提示不动手：收下来的原 HTML 都会备份到 <号>/原始HTML/，
 # 所以下载夹里那份已经是副本，陈少什么时候清都行（我们绝不删他的文件）。
-FP_FILE = ROOT / "_已归档指纹.json"
+FP_FILE = ROOT / "_管理" / "_已归档指纹.json"
 
 # 名单外的新号：文件先搁这儿，不建书、不混进别人的书；确认后自动回到收件箱
 PENDING_DIR = ROOT / "_待确认新号"
@@ -1952,15 +2062,18 @@ def _has_wechat_mark(text: str) -> bool:
 
 
 def _source_process_type(path: Path) -> str:
-    """这个文件该走哪条转换分支：wechat（官网直取）还是 notion（Notion 导出）。
+    """这个文件该走哪条转换分支：wechat（官网直取）/ notion（Notion 导出）/ webarchive（网页存档）。
 
     判据是**结构**，不是文件名——文件名可以随便改，结构改不了。
-    Notion 导出认「notion-page-content」或「page-body」容器。
+    Notion 导出认「notion-page-content」或「page-body」容器；
+    网页存档认「entry-content」或「<base href=」（WordPress 保存网页）。
     """
     try:
         text = _head_text(path, limit=3_000_000)
         if "notion-page-content" in text or 'class="page-body"' in text or "page-body" in text:
             return "notion"
+        if "entry-content" in text or "<base href=" in text.lower():
+            return "webarchive"
     except Exception:
         pass
     return "wechat"
@@ -2223,7 +2336,7 @@ def epub_stats(epub: Path) -> dict:
 
 def book_span(book: Path) -> tuple[str, str, int]:
     """该号 xhtml 的时间跨度与篇数（从文件名日期解析）。"""
-    files = sorted(source_dir(book).glob("*.xhtml"))
+    files = xhtml_all(source_dir(book))
     keys = []
     for f in files:
         m = DATE_RE.match(f.stem.replace("-Sigil", ""))
@@ -2237,7 +2350,7 @@ def book_span(book: Path) -> tuple[str, str, int]:
 
 def refresh_ledger() -> Path:
     """刷新线根下的 _台账.md——所有书的一览，随时能看清家底。"""
-    path = ROOT / "_台账.md"
+    path = ROOT / "_管理" / "_台账.md"
     lines = ["# 成书台账", "",
              "由 build_epub.py 自动刷新，别手改（改了会被覆盖）。", "",
              "| 公众号 | 篇数 | 跨度 | 成品 | 体积 | 目录条目 | 最后更新 |",
@@ -2271,7 +2384,7 @@ def write_report(built: list[str]) -> Path:
 
     预演另存 _处理报告_预演.md：预演不该抹掉「上次正式执行」的留痕。
     """
-    path = ROOT / ("_处理报告_预演.md" if STATS.get("dry_run") else "_处理报告.md")
+    path = ROOT / "_管理" / ("_处理报告_预演.md" if STATS.get("dry_run") else "_处理报告.md")
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = ["# 处理报告", "", "- 时间：%s" % now,
              "- 模式：%s" % ("**预演（没落地任何文件）**" if STATS.get("dry_run") else "正式执行"),
@@ -2372,14 +2485,14 @@ def finish(built: list[str]) -> None:
     """收尾：写处理报告 + 刷新台账 + 刷新推广图名单 + 重建报表页面。"""
     write_report(built)
     refresh_ledger()
-    (ROOT / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
-    log("台账 →", "_台账.md")
+    (ROOT / "_管理" / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
+    log("台账 →", "_管理/_台账.md")
     try:  # 报表只是好看，坏了绝不能影响成书
         import report as RP
         accounts = [RP.scan_account(b) for b in collect_book_dirs()]
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        (ROOT / "_报表.html").write_text(RP.build_html(accounts, now), encoding="utf-8")
-        log("报表 →", "_报表.html")
+        (ROOT / "_管理" / "_报表.html").write_text(RP.build_html(accounts, now), encoding="utf-8")
+        log("报表 →", "_管理/_报表.html")
     except Exception as exc:  # noqa: BLE001
         log("  报表生成失败（不影响成书）：", exc)
 
@@ -2438,7 +2551,7 @@ def main() -> int:
     if args.backfill_ads:
         n_files, n_cands = backfill_ads()
         log("补记账完成：%d 篇，新升候选 %d 个。名单见 ./epub.sh ads" % (n_files, n_cands))
-        (ROOT / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
+        (ROOT / "_管理" / "_推广图黑名单.md").write_text("\n".join(PROMO.report_lines()), encoding="utf-8")
         return 0
 
     if args.inbox:
@@ -2495,7 +2608,7 @@ def main() -> int:
             log("目录不存在：", d)
             continue
         if args.list:
-            arts = [a for a in (parse_article(p) for p in sorted(source_dir(d).glob("*.xhtml"))) if a]
+            arts = [a for a in (parse_article(p) for p in xhtml_all(source_dir(d))) if a]
             arts.sort(key=lambda a: a.sort_key)
             log("%s：%d 篇" % (d.name, len(arts)))
             for a in arts:

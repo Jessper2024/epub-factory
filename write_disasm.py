@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path("/Users/jessper/Life/学习工厂/02、文稿成品线")
-PROGRESS_FILE = ROOT / "_进度.json"
+PROGRESS_FILE = ROOT / "_管理" / "_进度.json"
 
 
 def _load() -> dict:

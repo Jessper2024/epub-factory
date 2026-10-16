@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from .. import audit
 
-# 顺序即优先级：先微信直取（特征更具体），再 Notion（泛一些）。
+# 顺序即优先级：先微信直取（特征更具体），再 Notion（泛一些），
+# 最后网页存档（base href + entry-content 特征最泛，放最后兜底）。
 # 认错来源会导致整篇产出格式不对，所以把判定更严的放前面。
-_ADAPTERS = ("wechat", "notion_wechat")
+_ADAPTERS = ("wechat", "notion_wechat", "webarchive")
 
 for _m in _ADAPTERS:
     try:

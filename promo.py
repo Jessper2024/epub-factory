@@ -215,7 +215,7 @@ def main() -> int:
         print("已确认 %d 个推广图，之后转换时会自动删除。" % n)
         return 0
     if "--save-report" in args:
-        path = ENGINE_DIR.parent / "_推广图黑名单.md"
+        path = ENGINE_DIR.parent / "_管理" / "_推广图黑名单.md"
         path.write_text("\n".join(report_lines()), encoding="utf-8")
         print("已写入", path)
         return 0

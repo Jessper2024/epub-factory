@@ -64,7 +64,8 @@ def check_sources(book):
     """返回 (问题列表, 是否有源)。"""
     src = _source_dir(book)
     bad = []
-    files = sorted(src.glob("*.xhtml"))
+    # 递归读：源可能按「年+月」分子目录（2026-10-16 陈少定）
+    files = sorted(p for p in src.rglob("*.xhtml") if p.is_file())
     if not files:
         return [(book.name, "没有 xhtml 源（无法重建，也无法随规则升级）")], False
 
@@ -122,6 +123,16 @@ def check_epub(epub):
                 continue
             if "/Text/part" in n:
                 entries += 1
+            # ★ nav.xhtml 的 href 路径基准校验（2026-10-15 Kobo 跳封面根因）：
+            # nav.xhtml 写在 OEBPS/Text/ 下，其 href 若带 "Text/" 前缀会被解析成
+            # Text/Text/xxx → 404 → Kobo 点目录条目回落到封面。这里拦截回归。
+            if n.endswith("nav.xhtml"):
+                for a in root.iter():
+                    if lname(a) == "a":
+                        href = a.get("href", "")
+                        if href.startswith("Text/"):
+                            issues.append(
+                                "nav.xhtml 链接路径错误(带 Text/ 前缀会 404 跳封面): %s" % href[:40])
             for el in root.iter():
                 tag = lname(el)
                 if tag in ("h1", "h2", "h3"):

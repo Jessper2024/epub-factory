@@ -124,9 +124,12 @@ def book_dir(key: str, author: str) -> Path:
     （同一作者在知乎和小红书是两本，这是陈少要的）。
     """
 
-    from build_epub import safe_stem      # 延迟导入：避免模块级互相依赖
+    from build_epub import safe_stem, merge_account  # 延迟导入：避免模块级互相依赖
 
-    clean = safe_stem(author) if author else "未识别作者"
+    # 号名归并（陈少 2026-10-14，长期）：作者名含 tony/xtony → 归 xtony 目录，
+    # 六镇 → 九边。入料归档阶段就归并，避免同名不同号拆成多本。
+    author = merge_account(author) if author else "未识别作者"
+    clean = safe_stem(author)
     path = platform_dir(key) / clean
     path.mkdir(parents=True, exist_ok=True)
     return path

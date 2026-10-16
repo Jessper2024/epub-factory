@@ -27,7 +27,7 @@ from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent
 ROOT = ENGINE.parent
-PROGRESS_FILE = ROOT / "_进度.json"
+PROGRESS_FILE = ROOT / "_管理" / "_进度.json"
 
 PAGE = """<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -74,21 +74,35 @@ PAGE = """<!DOCTYPE html>
   .links a:hover { text-decoration:underline; }
   .spin { display:inline-block; animation:sp 1.1s linear infinite; }
   @keyframes sp { to { transform:rotate(360deg); } }
+  .toolbar { margin:12px 0 4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .toolbar button { font:inherit; font-size:13px; padding:7px 16px; border:1px solid var(--fail);
+                    background:#fff; color:var(--fail); border-radius:8px; cursor:pointer; }
+  .toolbar button:hover { background:var(--fail); color:#fff; }
+  .toolbar button:disabled { opacity:.5; cursor:default; }
+  .tb-hint { color:var(--muted); font-size:12px; }
+  .sec { margin-top:26px; }
+  .sec-h { font-size:14px; font-weight:600; color:var(--ink);
+           padding-bottom:8px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; justify-content:space-between; }
+  .sec-c { font-size:12px; font-weight:400; color:var(--muted); }
+  .empty { color:var(--muted); font-size:12.5px; padding:8px 2px; }
+  .overview { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+              gap:10px; margin-bottom:22px; }
+  .ov { background:var(--card); border:1px solid var(--line); border-radius:10px;
+        padding:10px 12px; }
+  .ov-t { font-size:12px; color:var(--muted); margin-bottom:4px; }
 </style></head><body><div class="wrap">
-  <h1>投递箱处理进度</h1>
+  <h1>项目处理进度</h1>
   <div class="sub" id="sub">连接中…</div>
+  <div class="toolbar" id="toolbar" style="display:none;">
+    <button id="btn-clear" type="button">跳过卡死任务</button>
+    <span class="tb-hint">把「处理中/失败」卡住的任务关掉，进度条继续往下走；running 下轮 command 重试，fail 源料丢废纸篓</span>
+  </div>
   <div class="bar"><i id="bar"></i></div>
   <div class="counts" id="counts"></div>
   <div id="done"></div>
-  <ul id="list"></ul>
-  <div id="booksBox" style="display:none;">
-    <div class="sub" style="margin:24px 0 10px;font-weight:600;color:var(--ink);">更新 epub</div>
-    <ul id="books"></ul>
-  </div>
-  <div id="disasmBox" style="display:none;">
-    <div class="sub" style="margin:24px 0 10px;font-weight:600;color:var(--ink);">epub 拆解</div>
-    <ul id="disasm"></ul>
-  </div>
+  <div class="overview" id="overview"></div>
+  <div id="sections"></div>
   <div class="links">
     完整日志：<a href="/open/log" target="_blank">_投递箱处理日志.md</a><br>
     处理报告：<a href="/open/report" target="_blank">_处理报告.md</a><br>
@@ -96,17 +110,71 @@ PAGE = """<!DOCTYPE html>
   </div>
 </div>
 <script>
-const ICON = { ok:'✅', running:'⏳', waiting:'⬜', dup:'⏭', unknown:'⚠️', fail:'❌' };
+const ICON = { ok:'✅', running:'⏳', waiting:'⬜', dup:'⏭', unknown:'⚠️', fail:'❌', skip:'⏭', done:'✅' };
 const LABEL = { ok:'已归档', running:'处理中', waiting:'等待', dup:'重复跳过',
-                unknown:'待判', fail:'失败' };
+                unknown:'待判', fail:'失败', skip:'跳过', done:'完成' };
 let lastCount = 0;
+let clearing = false;
+
+async function clearStuck() {
+  if (clearing) return;
+  clearing = true;
+  renderLast();
+  try {
+    const r = await fetch('/clear', { method: 'POST' });
+    const d = await r.json();
+    // 后端清完，等下一轮 poll 自动刷新（renderLast 里已把按钮置灰）
+  } catch (e) { /* 忽略，下一轮 poll 会恢复正常 */ }
+  clearing = false;
+}
+
+// 缓存最近一次 render 用的数据，方便按钮点击时立即重绘（置灰）
+let lastData = null;
+function renderLast() {
+  if (lastData) render(lastData);
+}
+
+function fmt(t) {
+  return t ? String(t).replace('T', ' ').slice(5, 16) : '—';
+}
+function esc(s) {
+  return String(s || '').replace(/[&<>"]/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+}
+
+// 板块定义（与 progress.py SECTIONS 对齐：key, 标题, 产出说明）
+const SEC_ORDER = [
+  ['proofread', '文稿精校', '视频线二次精校'],
+  ['video',   '视频文稿', '字幕 / 精校稿'],
+  ['notes',   '读书笔记', '笔记 xhtml'],
+  ['article', '文章合集', '公众号 epub'],
+  ['book',    '出版图书', '完整书 epub'],
+  ['epub',    'EPUB 拆解', '分章 xhtml'],
+  ['adult',   '成人作品集', '演员 epub'],
+  ['photo',   '写真集', '图集 epub'],
+  ['finish',  '系统', ''],
+];
+
+function itemHtml(x) {
+  const ic = x.state === 'running'
+      ? `<span class="spin">⏳</span>` : (ICON[x.state] || '⬜');
+  const tg = x.target ? `<span class="tg">${esc(x.target)}</span>`
+             : (x.detail ? `<span class="tg">${esc(x.detail)}</span>` : '');
+  return `<li class="${x.state}"><span class="ic">${ic}</span>` +
+         `<span class="nm">${esc(x.name)}</span>${tg}</li>`;
+}
 
 function render(d) {
-  const items = d.items || [];
-  const n = items.length;
-  const by = k => items.filter(x => x.state === k).length;
-  const okN = by('ok'), dupN = by('dup'), unkN = by('unknown'), failN = by('fail');
-  const doneN = okN + dupN + unkN + failN;
+  lastData = d;
+  const secs = d.sections || {};
+  // 合计所有板块的项，算总进度
+  let allItems = [];
+  SEC_ORDER.forEach(([key]) => {
+    const s = secs[key];
+    if (s && Array.isArray(s.items)) allItems = allItems.concat(s.items);
+  });
+  const n = allItems.length;
+  const doneN = allItems.filter(x => ['ok','dup','unknown','fail','skip','done'].includes(x.state)).length;
   const pct = n ? Math.round(doneN / n * 100) : 0;
 
   document.getElementById('bar').style.width = pct + '%';
@@ -114,68 +182,63 @@ function render(d) {
       ? `已完成　${fmt(d.updated_at)}`
       : `处理中　开始于 ${fmt(d.started_at)}　·　页面每秒自动刷新`;
 
+  const okN = allItems.filter(x => x.state === 'ok').length;
+  const failN = allItems.filter(x => x.state === 'fail').length;
+  const runN = allItems.filter(x => x.state === 'running').length;
   document.getElementById('counts').innerHTML = [
-    `全部 <b>${n}</b>`, `已归档 <b>${okN}</b>`, `重复 <b>${dupN}</b>`,
-    unkN ? `待判 <b>${unkN}</b>` : '', failN ? `失败 <b>${failN}</b>` : '',
-    `等待 <b>${by('waiting')}</b>`
+    `全部 <b>${n}</b>`, `完成 <b>${okN}</b>`,
+    runN ? `处理中 <b>${runN}</b>` : '',
+    failN ? `失败 <b>${failN}</b>` : ''
   ].filter(Boolean).join('');
+
+  // 「跳过卡死任务」按钮：有 running 或 fail 才显示
+  const stuck = runN + failN;
+  const tb = document.getElementById('toolbar');
+  const btn = document.getElementById('btn-clear');
+  tb.style.display = stuck ? 'flex' : 'none';
+  btn.disabled = !!clearing;
+  btn.textContent = clearing ? '清理中…' : `跳过卡死任务（${stuck}）`;
 
   document.getElementById('done').innerHTML = d.finished
       ? `<div class="done">✓ 处理完成　${d.note || ''}</div>` : '';
 
-  document.getElementById('list').innerHTML = items.map(x => {
-    const ic = x.state === 'running'
-        ? `<span class="spin">⏳</span>` : (ICON[x.state] || '⬜');
-    const tg = x.target ? `<span class="tg">${esc(x.target)}</span>`
-               : (x.detail ? `<span class="tg">${esc(x.detail)}</span>` : '');
-    return `<li class="${x.state}"><span class="ic">${ic}</span>` +
-           `<span class="nm">${esc(x.name)}</span>${tg}</li>`;
+  // ★ 隐藏已处理完的板块（陈少 2026-10-16 定）：只有「还有 waiting/running」
+  //   的板块才显示——处理完（全终态）的板块不占位置，免得误以为还有活要干。
+  //   空板块（0 项）也一并隐藏。
+  const visible = SEC_ORDER.map(([key, title, desc]) => {
+    const s = secs[key];
+    const items = (s && Array.isArray(s.items)) ? s.items : [];
+    return { key, title, desc, items };
+  }).filter(x => x.items.some(i => i.state === 'waiting' || i.state === 'running'));
+
+  // 顶部总览卡：只显示有未完成任务的板块
+  document.getElementById('overview').innerHTML = visible.map(x => {
+    const done = x.items.filter(i => ['ok','dup','unknown','fail','skip','done'].includes(i.state)).length;
+    const inner = `<span style="font-size:15px;font-weight:500;">${done}<span style="font-size:12px;color:var(--muted);">/${x.items.length}</span></span>`;
+    return `<div class="ov"><div class="ov-t">${esc(x.title)}</div><div>${inner}</div></div>`;
   }).join('');
 
-  // 更新 epub 阶段（陈少 2026-10-14：处理投递箱后顺带更新的书）
-  const books = d.books || [];
-  const booksBox = document.getElementById('booksBox');
-  if (books.length) {
-    booksBox.style.display = 'block';
-    document.getElementById('books').innerHTML = books.map(b => {
-      const ic = b.state === 'fail' ? '❌' : '📖';
-      const tg = b.detail ? `<span class="tg">${esc(b.detail)}</span>` : '';
-      return `<li class="${b.state === 'fail' ? 'fail' : 'ok'}"><span class="ic">${ic}</span>` +
-             `<span class="nm">${esc(b.name)}</span>${tg}</li>`;
-    }).join('');
+  // 详情区：只显示有未完成任务的板块
+  const secHtml = visible.map(x => {
+    const sub = x.desc ? `${x.desc} · ${x.items.length} 项` : `${x.items.length} 项`;
+    return `<div class="sec"><div class="sec-h">${esc(x.title)}` +
+           `<span class="sec-c">${esc(sub)}</span></div>` +
+           `<ul>${x.items.map(itemHtml).join('')}</ul></div>`;
+  }).join('');
+  document.getElementById('sections').innerHTML = secHtml;
+
+  // 全部处理完：给一句明确提示，别让页面显得空
+  if (!visible.length) {
+    document.getElementById('sections').innerHTML =
+      `<div class="empty" style="padding:24px 4px;font-size:14px;">✓ 全部处理完成，没有待办任务。</div>`;
   }
 
-  // epub 拆解阶段（陈少 2026-10-14）
-  const disasm = d.disassembles || [];
-  const disasmBox = document.getElementById('disasmBox');
-  if (disasm.length) {
-    disasmBox.style.display = 'block';
-    document.getElementById('disasm').innerHTML = disasm.map(x => {
-      const ic = x.state === 'running' ? `<span class="spin">⏳</span>`
-               : x.state === 'done' ? '📦'
-               : x.state === 'fail' ? '❌'
-               : x.state === 'dup' ? '⏭' : '⬜';
-      const cls = x.state === 'running' ? 'running'
-                : x.state === 'fail' ? 'fail' : (x.state === 'done' ? 'ok' : 'waiting');
-      const tg = x.detail ? `<span class="tg">${esc(x.detail)}</span>` : '';
-      return `<li class="${cls}"><span class="ic">${ic}</span>` +
-             `<span class="nm">${esc(x.name)}</span>${tg}</li>`;
-    }).join('');
-  }
-
-  // 归档数变化时给点反馈（页面在后台也能看到标题闪一下）
   if (okN !== lastCount) {
     lastCount = okN;
-    document.title = `投递箱处理进度（${doneN}/${n}）`;
+    document.title = `项目处理进度（${doneN}/${n}）`;
   }
 }
-function esc(s) {
-  return String(s || '').replace(/[&<>"]/g, c =>
-      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-}
-function fmt(t) {
-  return t ? String(t).replace('T', ' ').slice(5, 16) : '—';
-}
+
 async function poll() {
   try {
     const r = await fetch('/progress.json?t=' + Date.now(), { cache: 'no-store' });
@@ -184,6 +247,7 @@ async function poll() {
 }
 poll();
 setInterval(poll, 1000);
+document.getElementById('btn-clear').addEventListener('click', clearStuck);
 </script></body></html>
 """
 
@@ -199,6 +263,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):              # noqa: N802
+        path = self.path.split("?")[0]
+        if path == "/clear":
+            # 进度页「跳过卡死任务」按钮：清 running + fail 条目。
+            import progress as _p
+            try:
+                result = _p.clear_stuck()
+            except Exception as e:
+                result = {"cleared": 0, "error": f"{type(e).__name__}: {e}"}
+            body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+            self._send(body, "application/json; charset=utf-8")
+            return
+        self._send(b"404", "text/plain; charset=utf-8", 404)
 
     def do_GET(self):                 # noqa: N802
         path = self.path.split("?")[0]
@@ -222,8 +300,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/open/"):
             # 只放行三个白名单文件，别变成任意文件读取的口子
             targets = {
-                "/open/log": ROOT / "_投递箱处理日志.md",
-                "/open/report": ROOT / "_处理报告.md",
+                "/open/log": ROOT / "_管理" / "_投递箱处理日志.md",
+                "/open/report": ROOT / "_管理" / "_处理报告.md",
             }
             if path in targets:
                 try:

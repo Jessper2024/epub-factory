@@ -79,7 +79,7 @@ def archived_rows() -> list[dict]:
             continue
         epubs = sorted(book.glob("*.epub"))
         book_name = epubs[0].stem if epubs else "%s（未成书）" % book.name
-        for p in sorted(xdir.glob("*.xhtml")):
+        for p in sorted(xdir.rglob("*.xhtml")):
             # 文件名格式固定为 日期_号_作者_标题-Sigil.xhtml；标题本身可能带下划线，
             # 所以按段切、不要把多余的段并进号名（会变成「猫笔刀_moomoocat」）。
             stem = p.name[:-len("-Sigil.xhtml")] if p.name.endswith("-Sigil.xhtml") else p.stem
@@ -217,7 +217,7 @@ def main() -> int:
     data = collect()
     md = to_md(data)
     if "--md" in sys.argv:
-        out = ROOT / "_文章台账.md"
+        out = ROOT / "_管理" / "_文章台账.md"
         out.write_text(md, encoding="utf-8")
         print("台账已存：%s" % out)
     else:

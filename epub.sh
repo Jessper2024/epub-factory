@@ -46,7 +46,6 @@ case "$cmd" in
   ingest) exec "$PY" "$ENGINE/ingest.py" "$@" ;;      # 统一入料：微信/Notion HTML/ZIP → 平台/作者
   ingest-auto) exec "$ENGINE/ingest_auto.sh" "$@" ;;  # 投递箱定时任务：install/status/run（每 4 小时）
   progress) exec "$PY" "$ENGINE/progress_server.py" "$@" ;;  # 实时进度页（只监听本机 8770）
-  migrate-md) exec "$PY" "$ENGINE/migrate_md.py" "$@" ;;  # 存量 md → xhtml（预演；--apply 执行）
   allow) [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --allow "$@" ;;
   auto)  exec "$ENGINE/inbox_auto.sh" "$@" ;;
   add)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/build_epub.py" --add "$@" ;;
