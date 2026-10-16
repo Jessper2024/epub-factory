@@ -275,6 +275,9 @@ def _overwrite_existing(info: dict, where: str, dry_run: bool) -> Path | None:
     # 陈少 2026-10-17 定：不留底 html，覆盖更新也不 copy，直接丢废纸篓。
     move_to_trash(info["path"])
 
+    # 号目录：dest_dir 可能是月份子目录（xhtml/YYYY年M月/），向上找一层
+    import re as _re
+    book_dir = dest_dir.parent if _re.match(r"^\d{4}年\d{1,2}月$", dest_dir.name) else dest_dir
     _pg(info["path"].name, "ok", "", "%s" % book_dir.name)
     print("  ✓ 覆盖更新：%s → %s" % (info["path"].name, new_out.name[:40]))
     TOUCHED_ACCOUNTS.add((key, author))

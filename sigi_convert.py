@@ -333,6 +333,45 @@ def _singlefile_page_url(source: etree._Element) -> str:
     return ""
 
 
+def _webp_to_png(payload: bytes, content_type: str) -> tuple[bytes, str]:
+    """WebP → PNG（陈少 2026-10-17 定）：源 xhtml 里不放 WebP。
+
+    为什么：PageEdit / macOS 快速查看等预览工具**不支持 base64 内联的 WebP**，
+    会显示成 `@image#1` 占位符，正文图全看不见。而微信图床现在默认返回 WebP，
+    转换期内联后源 xhtml 就带着 WebP，直接预览就废了。
+    → 转换期一律把 WebP 转 PNG（无损，图表截图清晰），xxhtml 预览和 epub 双双友好。
+
+    非 WebP（png/jpeg/gif 等）原样返回。解码失败也原样返回（宁可留着也别丢图）。
+    """
+    if "webp" not in (content_type or "").lower():
+        return payload, content_type
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(payload))
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue(), "image/png"
+    except Exception:      # noqa: BLE001 - 转不了就原样留着，不能因一张图炸整篇
+        return payload, content_type
+
+
+def _convert_inline_webp(image: etree._Element, raw: str) -> bool:
+    """把已是内联 data:image/webp 的 <img> 就地转成 PNG（陈少 2026-10-17）。"""
+    try:
+        b64 = raw.split("base64,", 1)[1]
+        payload = base64.b64decode(b64)
+    except Exception:      # noqa: BLE001
+        return False
+    new_payload, new_ct = _webp_to_png(payload, "image/webp")
+    if new_ct == "image/png":
+        image.set("src", "data:image/png;base64," + base64.b64encode(new_payload).decode("ascii"))
+        return True
+    return False
+
+
 def _embed_external_images(
     root: etree._Element, base_href: str = "", public_base_href: str = ""
 ) -> dict[str, int]:
@@ -346,6 +385,10 @@ def _embed_external_images(
     embedded = failed = attempted = 0
     for image in root.xpath('.//*[local-name()="img"]'):
         raw = (image.get("src") or "").strip()
+        # 已经是内联 base64 的图：若为 WebP（微信图床常见），就地转 PNG（陈少 2026-10-17）
+        if raw.lower().startswith("data:image/webp"):
+            _convert_inline_webp(image, raw)
+            continue
         source = image_source(image)
         candidates: list[str] = []
         if raw.startswith(("/", "./")) and base_href:
@@ -372,6 +415,8 @@ def _embed_external_images(
                     content_type = guessed.lower()
                 if not content_type.startswith("image/") or not payload:
                     continue
+                # 微信图床默认返回 WebP → 转 PNG，源 xhtml 和 epub 双双预览友好（陈少 2026-10-17）
+                payload, content_type = _webp_to_png(payload, content_type)
                 image.set("src", f"data:{content_type};base64,{base64.b64encode(payload).decode('ascii')}")
                 embedded += 1
                 break
