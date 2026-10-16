@@ -76,9 +76,16 @@ VIDEO_INBOX="$FACTORY/01、视频文稿线/01、投递箱"
 VIDEO_CSV_INGEST="$HOME/.workbuddy/skills/video-subtitle-fetcher/tools/ingest_video_csv.py"
 if [ -f "$VIDEO_CSV_INGEST" ]; then
   # CSV 字段「序号/标题/链接/作者」，按链接域名分流 B站/YouTube，一个链接一个集目录；
-  # 本地零 Token（调 run.py flow 抓字幕+弹幕），抓完 CSV 归档进 _已处理CSV/
+  # 本地零 Token（调 run.py flow 抓字幕+弹幕），抓完 CSV 归档进 _已处理CSV/。
+  # 抓取过程**实时透传输出**（每个视频逐行打出来），陈少能看到「第 N/M 个、抓取中、完成」。
   # 注意：抓取是长任务，CSV 已「先归档再抓取」（脚本内），中断也不会滞留投递箱。
   "$PY" "$VIDEO_CSV_INGEST" "$VIDEO_INBOX"
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    echo "  ✓ 视频 CSV 全部抓取完成"
+  else
+    echo "  ⚠ 视频 CSV 抓取有失败（rc=$rc），看上面明细"
+  fi
 else
   echo "  （视频 CSV 抓取脚本不存在，跳过）"
 fi
