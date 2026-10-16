@@ -8,7 +8,7 @@
 #   ⓪⁺² 视频文稿归位   route_pending.py      扫 01、视频文稿线/01、投递箱 手投字幕稿（合集名-序号-标题_文稿.txt）→ 归到对应集目录改名 _字幕_L1.txt
 #   ① 读书笔记       reading_notes.py     扫 01、投递箱 KoodoReader/Koodo Reader html + *clipping*.txt（先搬走，避免被 ingest 标待判）
 #   ①⁺ EPUB 拆解     epub-to-xhtml/split.sh  完整 .epub 先移入 04、EPUB拆解/0000、原始文件/ 再拆成编号 xhtml（不碰 Notion）
-#   ② 文稿线         ingest.py            扫 02、文稿成品线/01、投递箱（html/zip，含防 Koodo 抢跑兜底）
+#   ② 文稿线         ingest.py            扫 02、文稿成品线/01、投递箱（微信三种形态/Notion/html/zip，含防 Koodo 抢跑兜底）
 #   ②⁺ 作者目录归一  merge_accounts.py     六镇→九边 / 龙虎榜三板斧→猫笔刀 / tony→xtony
 #   ③ 成人线         intake_dispatch.py    扫 03、成人作品集线/{演员}/01、投递箱（CSV）
 #   ④ 写真线         make_epub.py（遍历）   扫 04、写真集线/01、投递箱（图片文件夹）
@@ -160,6 +160,9 @@ echo
 # ═══ ② 文稿线 ═══
 echo "──────────────── ② 文稿线（html / zip / epub）────────────────"
 cd "$ENGINE"
+# ingest.py 统一入料，吃三种微信 HTML 形态 + Notion 导出 + ZIP，最终产出同一种 XHTML：
+#   ① SingleFile 导出（var ct 时间戳）② Single HTML download「另存为」（base href + publish_time 可见日期）
+#   ③ Notion 导出（属性表）——日期/作者都能解析，落 02、定稿库/<平台>/<作者>/xhtml/YYYY年M月/。
 "$PY" ingest.py
 echo
 
