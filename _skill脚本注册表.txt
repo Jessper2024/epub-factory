@@ -1,0 +1,13 @@
+# 学习工厂 · Skill 脚本注册表（唯一真相源）
+# 格式：用途|脚本路径（绝对路径）
+# 用途：Command 启动时 source 本文件，统一从这里取 skill 脚本路径。
+#       以后 skill 目录改名/迁移，只改这里一处，不用动 Command 主体。
+# 注意：路径含空格/中文，用「用途|路径」竖线分隔，不用逗号。
+
+视频CSV抓取|/Users/jessper/.workbuddy/skills/video-subtitle-fetcher/tools/ingest_video_csv.py
+视频文稿归位|/Users/jessper/.workbuddy/skills/video-subtitle-fetcher/tools/route_pending.py
+EPUB拆解|/Users/jessper/.workbuddy/skills/epub-to-xhtml/scripts/split.sh
+EPUB推Notion|/Users/jessper/.workbuddy/skills/epub-to-xhtml/scripts/notion/push.sh
+成人线分发|/Users/jessper/.workbuddy/skills/edge-batch-capture/scripts/intake_dispatch.py
+写真线出书|/Users/jessper/.workbuddy/skills/photobook-epub/scripts/make_epub.py
+看板刷新|/Users/jessper/.workbuddy/skills/dashboard-hub/scripts/dashboard.py

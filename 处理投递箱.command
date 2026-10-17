@@ -20,6 +20,62 @@ PY="/Users/jessper/.workbuddy/binaries/python/envs/default/bin/python"
 FACTORY="$HOME/Life/学习工厂"
 ENGINE="$FACTORY/02、文稿成品线/_engine"
 
+# ═══ Skill 脚本注册表 + 自检（陈少 2026-10-18 定：skill 更新后 Command 双击即用最新，不失效不重复报错）═══
+# 注册表 = _skill脚本注册表.txt（用途|路径），统一管理「引擎外 skill 脚本」的路径。
+# 启动时逐条自检：脚本存在 → 正常；不存在 → 按用途在同名 skill 目录下 glob 探测兜底，
+# 探测到就更新路径；探测不到才报错一次（写日志 + 终端醒目提示），并标记该段跳过。
+REG_FILE="$ENGINE/_skill脚本注册表.txt"
+# 关联数组：用途 → 路径（zsh 特有）
+typeset -A SKILL_PATH
+if [ -f "$REG_FILE" ]; then
+  while IFS='|' read -r _k _p; do
+    # 跳过空行和注释行（# 开头）
+    [ -z "$_k" ] && continue
+    case "$_k" in
+      \#*) continue ;;
+    esac
+    [ -n "$_p" ] && SKILL_PATH["$_k"]="$_p"
+  done < "$REG_FILE"
+fi
+
+# 取脚本路径：<用途> [兜底glob模式]。存在即返回；不存在则用兜底模式探测。
+# 兜底模式形如 ~/.workbuddy/skills/<skill名>/**/脚本名，用于 skill 目录内部迁移。
+skill_script() {
+  local key="$1" fallback="$2"
+  local p="${SKILL_PATH[$key]:-}"
+  if [ -n "$p" ] && [ -f "$p" ]; then
+    echo "$p"
+    return 0
+  fi
+  # 兜底探测：在 skills 根下按 fallback glob 找（第一个命中）
+  if [ -n "$fallback" ]; then
+    local hit
+    hit="$(ls "$HOME/.workbuddy/skills"/$fallback 2>/dev/null | head -1)"
+    if [ -n "$hit" ]; then
+      echo "$hit"
+      SKILL_PATH[$key]="$hit"   # 记住探测结果，本次运行不再重复探测
+      return 0
+    fi
+  fi
+  echo ""
+  return 1
+}
+
+# 启动自检：遍历注册表，把「缺失且探测不到」的脚本报错一次（不重复）
+_selfcheck_done=0
+selfcheck() {
+  [ $_selfcheck_done -eq 1 ] && return 0
+  _selfcheck_done=1
+  local key
+  for key in "${(@k)SKILL_PATH}"; do
+    if [ ! -f "${SKILL_PATH[$key]}" ]; then
+      echo "  ⚠️ 脚本缺失：$key → ${SKILL_PATH[$key]}（skill 可能被改名/删除，请检查注册表）"
+    fi
+  done
+  return 0
+}
+
+
 # ═══ 运行日志（每次双击全程落盘，问题排查直接读这个文件，不用再问陈少）═══
 # 日志路径：~/Life/学习工厂/02、文稿成品线/_engine/_command运行日志.log
 # 每次运行：打分隔线+时间戳；stdout+stderr 全量追加；终端窗口同步显示（tee）。
@@ -70,6 +126,9 @@ echo "  学习工厂 · 统一处理　$(date '+%Y-%m-%d %H:%M')"
 echo "════════════════════════════════════════════════════"
 echo
 
+# Skill 脚本启动自检：缺失的脚本报错一次（写日志+终端），不重复刷屏
+selfcheck
+
 # ═══ ⓪ 进度页（后台起，跑完不关）═══
 PORT=8770
 PIDFILE="/tmp/epub-progress.pid"
@@ -88,8 +147,8 @@ echo
 # ═══ ⓪⁺ 视频文稿线（投递箱 CSV → 抓字幕+弹幕+建集目录）═══
 echo "──────────────── ⓪⁺ 视频文稿线（CSV 抓取）────────────────"
 VIDEO_INBOX="$FACTORY/01、视频文稿线/01、投递箱"
-VIDEO_CSV_INGEST="$HOME/.workbuddy/skills/video-subtitle-fetcher/tools/ingest_video_csv.py"
-if [ -f "$VIDEO_CSV_INGEST" ]; then
+VIDEO_CSV_INGEST="$(skill_script '视频CSV抓取' 'video-subtitle-fetcher/tools/ingest_video_csv.py')"
+if [ -n "$VIDEO_CSV_INGEST" ]; then
   # CSV 字段「序号/标题/链接/作者」，按链接域名分流 B站/YouTube，一个链接一个集目录；
   # 本地零 Token（调 run.py flow 抓字幕+弹幕），抓完 CSV 归档进 _已处理CSV/。
   # 抓取过程**实时透传输出**（每个视频逐行打出来），陈少能看到「第 N/M 个、抓取中、完成」。
@@ -108,8 +167,8 @@ echo
 
 # ═══ ⓪⁺² 视频文稿归位（陈少手投的字幕 L1 稿「合集名 - 序号 - 标题_文稿.txt」→ 自动归到对应集目录，改名 _字幕_L1.txt）═══
 echo "──────────────── ⓪⁺² 视频文稿归位（手投字幕稿 → 集目录）────────────────"
-ROUTE_PY="$HOME/.workbuddy/skills/video-subtitle-fetcher/tools/route_pending.py"
-if [ -f "$ROUTE_PY" ]; then
+ROUTE_PY="$(skill_script '视频文稿归位' 'video-subtitle-fetcher/tools/route_pending.py')"
+if [ -n "$ROUTE_PY" ]; then
   "$PY" "$ROUTE_PY" --go
 else
   echo "  （route_pending.py 不存在，跳过）"
@@ -130,11 +189,11 @@ echo
 # ═══ ①⁺ EPUB 拆解 + 推 Notion（完整 EPUB：拆成编号 xhtml 存 04、EPUB拆解/，再自动推「图书库拆解中转库」）═══
 echo "──────────────── ①⁺ EPUB 拆解 + 推 Notion（完整 epub）────────────────"
 cd "$ENGINE"
-EPUB_SPLIT="$HOME/.workbuddy/skills/epub-to-xhtml/scripts/split.sh"
-EPUB_PUSH="$HOME/.workbuddy/skills/epub-to-xhtml/scripts/notion/push.sh"
+EPUB_SPLIT="$(skill_script 'EPUB拆解' 'epub-to-xhtml/scripts/split.sh')"
+EPUB_PUSH="$(skill_script 'EPUB推Notion' 'epub-to-xhtml/scripts/notion/push.sh')"
 EPUB_SRC="$FACTORY/02、文稿成品线/04、EPUB拆解/0000、原始文件"
 EPUB_PARENT="3e2641b1-9740-8010-97dd-e247925cb8c9"   # 图书库拆解中转库 database UUID
-if [ -f "$EPUB_SPLIT" ]; then
+if [ -n "$EPUB_SPLIT" ]; then
   n=0
   # (N) = NULL_GLOB：无 .epub 时展开为空，不报 no matches found（否则 command 在这里崩掉，后面段全不跑）
   for f in "$ENGINE/../01、投递箱"/*.epub(N); do
@@ -163,7 +222,7 @@ if [ -f "$EPUB_SPLIT" ]; then
       book_dir="$FACTORY/02、文稿成品线/04、EPUB拆解/$real_title"
       echo "  · 拆解目录：$(basename "$book_dir")"
       # 推 Notion：拆外链版 → push → 删临时外链目录
-      if [ -f "$EPUB_PUSH" ]; then
+      if [ -n "$EPUB_PUSH" ]; then
         # ★ 实时透传 push 输出（不要 >/dev/null）——否则逐章推送静默，看着像「没反应」
         if bash "$EPUB_SPLIT" "$EPUB_SRC/$name" --subdir "_notion外链" >/dev/null 2>&1; then
           echo "  → 开始推 Notion（共 40 章，逐章显示进度）…"
@@ -214,8 +273,8 @@ echo
 
 # ═══ ③ 成人线 ═══
 echo "──────────────── ③ 成人线（CSV）────────────────"
-ADULT="$HOME/.workbuddy/skills/edge-batch-capture/scripts/intake_dispatch.py"
-if [ -f "$ADULT" ]; then
+ADULT="$(skill_script '成人线分发' 'edge-batch-capture/scripts/intake_dispatch.py')"
+if [ -n "$ADULT" ]; then
   report adult "成人线分发" running "扫描投递箱 CSV"
   "$PY" "$ADULT" 2>&1 | tail -20
   report adult "成人线分发" ok "已分发"
@@ -227,10 +286,10 @@ echo
 
 # ═══ ④ 写真线 ═══
 echo "──────────────── ④ 写真线（图片文件夹）────────────────"
-PHOTO="$HOME/.workbuddy/skills/photobook-epub/scripts/make_epub.py"
+PHOTO="$(skill_script '写真线出书' 'photobook-epub/scripts/make_epub.py')"
 PHOTO_BOX="$FACTORY/04、写真集线/01、投递箱"
 PHOTO_OUT="$FACTORY/04、写真集线/02、成书"
-if [ -d "$PHOTO_BOX" ]; then
+if [ -n "$PHOTO" ] && [ -d "$PHOTO_BOX" ]; then
   n=0
   for d in "$PHOTO_BOX"/*/(N); do
     [ -d "$d" ] || continue
@@ -280,7 +339,12 @@ echo
 # ═══ ⑥ 刷新看板 + 推 GitHub ═══
 echo "──────────────── ⑤ 刷新看板 + 推 GitHub ────────────────"
 report finish "刷新看板" running "刷新中"
-"$PY" "$HOME/.workbuddy/skills/dashboard-hub/scripts/dashboard.py" 2>&1 | tail -3
+DASH="$(skill_script '看板刷新' 'dashboard-hub/scripts/dashboard.py')"
+if [ -n "$DASH" ]; then
+  "$PY" "$DASH" 2>&1 | tail -3
+else
+  echo "  （dashboard.py 缺失，跳过看板刷新）"
+fi
 report finish "刷新看板" ok "看板已刷新"
 
 BOARD_DIR="$FACTORY/00、看板中枢"
