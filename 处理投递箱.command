@@ -135,10 +135,19 @@ if [ -f "$EPUB_SPLIT" ]; then
     mv "$f" "$EPUB_SRC/$name"
     echo "  → 源移入 0000、原始文件/$name"
     report epub "$name" running "拆解中"
-    if bash "$EPUB_SPLIT" "$EPUB_SRC/$name" >/dev/null 2>&1; then
+    # ★ 拆解目录名来自 epub 内部书名（dc:title），**不是文件名**——
+    #   如「川沐笔记 重制版.epub」拆出的是「川沐笔记/」。
+    #   所以先从 split 输出里抓「书名: XXX」拿真实目录名，别用 basename 硬拼（2026-10-17 踩过）。
+    split_out="$(bash "$EPUB_SPLIT" "$EPUB_SRC/$name" 2>&1)"
+    if [ $? -eq 0 ]; then
       echo "  ✓ 已拆解：$name"
+      real_title="$(printf '%s\n' "$split_out" | sed -n 's/^书名: //p' | head -1)"
+      if [ -z "$real_title" ]; then
+        real_title="$(basename "$name" .epub)"     # 兜底：抓不到书名就用文件名
+      fi
+      book_dir="$FACTORY/02、文稿成品线/04、EPUB拆解/$real_title"
+      echo "  · 拆解目录：$(basename "$book_dir")"
       # 推 Notion：拆外链版 → push → 删临时外链目录
-      book_dir="$FACTORY/02、文稿成品线/04、EPUB拆解/$(basename "$name" .epub)"
       if [ -f "$EPUB_PUSH" ]; then
         if bash "$EPUB_SPLIT" "$EPUB_SRC/$name" --subdir "_notion外链" >/dev/null 2>&1 \
            && bash "$EPUB_PUSH" "$book_dir/_notion外链" --parent "$EPUB_PARENT" >/dev/null 2>&1; then
@@ -147,6 +156,7 @@ if [ -f "$EPUB_SPLIT" ]; then
           report epub "$name" ok "已拆解并推 Notion"
         else
           echo "  ✗ 推 Notion 失败（拆解已保留）：$name"
+          echo "     外链版保留在：$book_dir/_notion外链"
           report epub "$name" fail "推 Notion 失败（拆解已保留）"
         fi
       else
@@ -155,6 +165,7 @@ if [ -f "$EPUB_SPLIT" ]; then
       n=$((n+1))
     else
       echo "  ✗ 拆解失败：$name"
+      printf '%s\n' "$split_out" | tail -5
       report epub "$name" fail "拆解失败"
     fi
   done
