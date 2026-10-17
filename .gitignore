@@ -12,3 +12,6 @@ yuanchuan_crawler/*.epub
 allowed_accounts.json
 config.local.json
 launchd/*.log
+
+# Command 运行日志（本地排查用，不进版本库）
+_command运行日志.log
