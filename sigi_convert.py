@@ -2084,7 +2084,60 @@ def _normalise_article(article: etree._Element) -> tuple[list[etree._Element], i
         if not heading.get("id"):
             counter[0] += 1
             heading.set("id", f"section-{counter[0]}")
+    blocks = _merge_numbered_headings(blocks)
     return blocks, removed
+
+
+def _merge_numbered_headings(blocks: list[etree._Element]) -> list[etree._Element]:
+    """合并「纯数字标题 + 真标题」两行式小标题（陈少 2026-10-17 定，所有公众号生效）。
+
+    微信/公众号导出常有这种形态：编号独占一个标题、下一行才是真标题：
+        <h2 class="section-title">1</h2>
+        <h2 class="section-title">沃什带崩贵金属市场？</h2>
+    这在 EPUB 目录里会变成两条（「1」和「沃什带崩贵金属市场？」）。规则：
+
+    - 纯数字标题（1-2 位，如 ``1`` / ``01``），其后**紧跟一个真标题 h2** → 合并成
+      ``N、真标题``（顿号分隔），删掉纯数字标题。
+    - 纯数字标题后紧跟 ``<hr/>`` 再跟真标题 h2（新华网形态）→ 同样合并，`<hr/>` 一并删。
+    - 纯数字标题后**直接是正文段落**（九边/饭统形态，作者用数字分节、本无文字标题）→
+      **保留纯数字标题不动**（它是分节序号，不是标题，强行合并会错杀正文第一句）。
+
+    幂等：已是 ``N、标题`` 的标题不重复处理。
+    """
+    out: list[etree._Element] = []
+    i = 0
+    n = len(blocks)
+    def _is_heading(el) -> bool:
+        return _tag(el) in ("h2", "h3") and el.get("class") == "section-title"
+    while i < n:
+        b = blocks[i]
+        if not _is_heading(b):
+            out.append(b)
+            i += 1
+            continue
+        text = _text_value(b)
+        if not re.fullmatch(r"\d{1,2}", text):
+            out.append(b)
+            i += 1
+            continue
+        # 纯数字标题：看下一个非空块是不是真标题 h2/h3（或 hr 之后紧跟真标题）
+        j = i + 1
+        # 跳过紧随其后的 <hr/>（新华网形态）
+        if j < n and _tag(blocks[j]) == "hr":
+            j += 1
+        if j < n and _is_heading(blocks[j]):
+            next_text = _text_value(blocks[j])
+            if next_text and not re.fullmatch(r"\d{1,2}", next_text):
+                # 合并：N、标题（保留真标题的原有内联内容，前面拼 N、）
+                merged = blocks[j]
+                merged.text = f"{text}、{merged.text or ''}"
+                out.append(merged)
+                i = j + 1
+                continue
+        # 情况③：数字后是正文，保留数字标题不动
+        out.append(b)
+        i += 1
+    return out
 
 
 def _to_xhtml(node: etree._Element, namespace: str) -> etree._Element:

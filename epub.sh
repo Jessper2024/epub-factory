@@ -26,6 +26,7 @@
 #   ./epub.sh ledger      全量文章台账（已进书 + 未收，标疑似重复/可归号/新号）；--md 存成文件
 #   ./epub.sh emoji       全量回改源 xhtml：给表情图补 class=emoji + 内联样式（--dry-run 预演）
 #   ./epub.sh webp2png    全量回改源 xhtml：内联 WebP → PNG（预览友好，--dry-run 预演）
+#   ./epub.sh merge-headings  回改源 xhtml：合并「纯数字标题+真标题」两行式小标题（--dry-run 预演）
 set -euo pipefail
 
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,6 +79,7 @@ case "$cmd" in
   ledger)  exec "$PY" "$ENGINE/ledger.py" "$@" ;;    # 全量文章台账；--md 存成 _文章台账.md
   emoji)  exec "$PY" "$ENGINE/tag_emoji_sources.py" "$@" ;;  # 全量回改源 xhtml：补 emoji 标记+样式
   webp2png) exec "$PY" "$ENGINE/webp_to_png_sources.py" "$@" ;;  # 全量回改源 xhtml：内联 WebP → PNG（预览友好）
+  merge-headings) exec "$PY" "$ENGINE/merge_numbered_headings.py" "$@" ;;  # 回改源 xhtml：合并「纯数字标题+真标题」两行式小标题
   pdf)    exec "$PY" "$ENGINE/html_to_pdf.py" "$@" ;;        # 按需：从 html/ 留底重出 PDF（PDF 线暂停，需手动触发）
   toc)   [ $# -ge 1 ] || usage; exec "$PY" "$ENGINE/dump_toc.py" "$@" ;;
   *)     usage ;;
