@@ -35,7 +35,8 @@ def scan_and_merge(dry_run: bool) -> list[str]:
         for d in sorted(root.iterdir()):
             if not d.is_dir() or d.name.startswith("."):
                 continue
-            target_name = merge_account(d.name)
+            # 号名归并（精确别名 + 平台分割，2026-10-17 改）：传平台 key，只归并同平台别名
+            target_name = merge_account(d.name, key)
             if target_name == d.name:
                 continue  # 不归并，跳过
             target = root / target_name

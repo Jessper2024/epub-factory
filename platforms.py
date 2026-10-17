@@ -126,9 +126,9 @@ def book_dir(key: str, author: str) -> Path:
 
     from build_epub import safe_stem, merge_account  # 延迟导入：避免模块级互相依赖
 
-    # 号名归并（陈少 2026-10-14，长期）：作者名含 tony/xtony → 归 xtony 目录，
-    # 六镇 → 九边。入料归档阶段就归并，避免同名不同号拆成多本。
-    author = merge_account(author) if author else "未识别作者"
+    # 号名归并（陈少 2026-10-17 定：精确别名 + 平台分割）。key = 平台 key，
+    # 归并只发生在同一平台内（六镇→九边、风云XTony/逍遥XTony系列→XTony 等）。
+    author = merge_account(author, key) if author else "未识别作者"
     clean = safe_stem(author)
     path = platform_dir(key) / clean
     path.mkdir(parents=True, exist_ok=True)

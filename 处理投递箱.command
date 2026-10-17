@@ -149,15 +149,21 @@ if [ -f "$EPUB_SPLIT" ]; then
       echo "  · 拆解目录：$(basename "$book_dir")"
       # 推 Notion：拆外链版 → push → 删临时外链目录
       if [ -f "$EPUB_PUSH" ]; then
-        if bash "$EPUB_SPLIT" "$EPUB_SRC/$name" --subdir "_notion外链" >/dev/null 2>&1 \
-           && bash "$EPUB_PUSH" "$book_dir/_notion外链" --parent "$EPUB_PARENT" >/dev/null 2>&1; then
-          echo "  ✓ 已推 Notion：$name"
-          rm -rf "$book_dir/_notion外链"
-          report epub "$name" ok "已拆解并推 Notion"
+        # ★ 实时透传 push 输出（不要 >/dev/null）——否则逐章推送静默，看着像「没反应」
+        if bash "$EPUB_SPLIT" "$EPUB_SRC/$name" --subdir "_notion外链" >/dev/null 2>&1; then
+          echo "  → 开始推 Notion（共 40 章，逐章显示进度）…"
+          if bash "$EPUB_PUSH" "$book_dir/_notion外链" --parent "$EPUB_PARENT"; then
+            echo "  ✓ 已推 Notion：$name"
+            rm -rf "$book_dir/_notion外链"
+            report epub "$name" ok "已拆解并推 Notion"
+          else
+            echo "  ✗ 推 Notion 失败（拆解已保留）：$name"
+            echo "     外链版保留在：$book_dir/_notion外链（可重跑 push.sh --continue 续传）"
+            report epub "$name" fail "推 Notion 失败（拆解已保留）"
+          fi
         else
-          echo "  ✗ 推 Notion 失败（拆解已保留）：$name"
-          echo "     外链版保留在：$book_dir/_notion外链"
-          report epub "$name" fail "推 Notion 失败（拆解已保留）"
+          echo "  ✗ 拆外链失败（拆解已保留）：$name"
+          report epub "$name" fail "拆外链失败"
         fi
       else
         report epub "$name" ok "已拆解（未推 Notion，缺 push.sh）"

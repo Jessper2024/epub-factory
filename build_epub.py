@@ -1606,18 +1606,24 @@ def _add_one(p: Path, archive_original: bool, dry_run: bool, touched: dict) -> N
 
 
 # ---------------------------------------------------------------- 入口
-def merge_account(account: str) -> str:
-    """号名归并（唯一实现，入料归档 + 出书两处共用，2026-10-14 定）。
+def merge_account(account: str, platform: str = "") -> str:
+    """号名归并（唯一实现，入料归档 + 出书两处共用，2026-10-17 改定）。
 
-    1. 精确别名（六镇→九边、龙虎榜三板斧→猫笔刀）
-    2. 子串归并（作者名含 tony/xtony → xtony，大小写不敏感）
-    只改目录归属，作者字段/文件名里的作者段如实保留（前端展示一律原名）。
+    **精确别名 + 平台分割**（陈少 2026-10-17 最终口径）：
+    - 归并只发生在**同一平台内**（platform 指定时只查该平台的别名表）；
+    - 匹配方式**精确相等**（辅名一字不差，含括号/空格/全半角），不再子串模糊。
+    - 只改目录归属，作者字段/文件名作者段如实保留（前端展示一律原名）。
     """
-    account = ACCOUNT_ALIASES.get(account, account)
-    alow = account.lower()
-    for sub, target in ACCOUNT_SUBSTR_MAP.items():
-        if sub in alow:
-            return target
+    if not account:
+        return account
+    table = ACCOUNT_ALIASES.get(platform, {}) if platform else {}
+    if table and account in table:
+        return table[account]
+    # platform 未传或该平台无此别名 → 回退：跨平台兜底（出书阶段的旧目录名兼容）
+    if not platform:
+        for plat_table in ACCOUNT_ALIASES.values():
+            if account in plat_table:
+                return plat_table[account]
     return account
 
 
@@ -1740,31 +1746,36 @@ COVER_FONT_PATH = "/Users/jessper/Library/Fonts/方正屏显臻宋.TTF"
 # 封面用米白底+屏显臻宋+大字号月份；其他号保持单本合订不变。
 SPLIT_MONTH_ACCOUNTS = {"格隆汇图解天下", "猫笔刀", "九边"}
 
-# ★ 号名归并（陈少 2026-10-14 定，特殊情况，仅此一对）：
-#   九边、六镇是两个公众号、背后同一个人。六镇的文章归档到「九边」目录下，
-#   但作者字段仍写「六镇」；出书时书名《九边六镇合集》，h1 用「九边」「六镇」
-#   两个来源号做一级分区，区内按日期排序。
-#   别名表：识别到「六镇」→ 落「九边」目录。作者保留，靠文件名/作者字段分辨来源。
+# ★ 号名归并（陈少 2026-10-17 定，最终口径：四列表 + 精确别名 + 平台分割）。
+#   结构：{平台key: {辅名: 主名}}。归并**只发生在同一平台内**，跨平台同名不归并
+#   （同一个人在微博和 Twitter 是两份独立记录，各归各的主名）。
+#   匹配方式：**精确别名**（辅名一字不差，含括号/空格/全半角）——不再用子串模糊，
+#   陈少 2026-10-17 发现模糊匹配会遗漏「高度相似但规格不同」的变体，改为精确 + 人工补表。
+#   作者字段（前端展示）一律保留辅名原文，不覆盖。
+#   平台 key 与 platforms.PLATFORMS 一致：wechat/weibo/twitter/zhihu/xiaohongshu/...
 ACCOUNT_ALIASES = {
-    "六镇": "九边",
-    # 龙虎榜三板斧 = 猫笔刀同一个人（陈少 2026-10-14 定）
-    "龙虎榜三板斧": "猫笔刀",
-    # 猫老师脚气害我口腔溃疡2号 = 主号同一个人（陈少 2026-10-16 定）
-    "猫老师脚气害我口腔溃疡2号": "猫老师脚气害我口腔溃疡",
+    "wechat": {
+        "六镇": "九边",
+        "龙虎榜三板斧": "猫笔刀",
+    },
+    "weibo": {
+        "猫老师脚气害我口腔溃疡2号": "猫老师脚气害我口腔溃疡",
+        "风云XTony": "XTony",
+    },
+    "twitter": {
+        "逍遥XTony": "XTony",
+        "逍遥XTony（2分钟版）": "XTony",
+        "逍遥XTony（怀念张雪峰版）": "XTony",
+        "逍遥XTony（恩师张雪峰）": "XTony",
+        "逍遥XTony (清华张疆喜欢嫖娼)": "XTony",
+        "逍遥XTony(清华嫖虫张疆一生之敌)": "XTony",
+    },
 }
 
-# ★ 子串归并（陈少 2026-10-14 定，长期）：作者名**包含**某子串 → 归到目标目录。
-#   用于「同一个人不同时期改名」的场景：含 tony/xtony 的作者名（如
-#   「逍遥XTony（2分钟版）」「xTonyPro」等）都归到「xtony」目录，作者字段如实保留。
-#   （与 ACCOUNT_ALIASES 的区别：那是精确同名，这是"包含即归并"。）
-ACCOUNT_SUBSTR_MAP = {
-    "xtony": "xtony",
-    "tony": "xtony",
-}
-
-# ★ 号名显示映射（陈少 2026-10-14）：封面/书名显示用规范名，目录名保持小写归并。
-#   xtony 目录（小写）→ 封面显示「XTony」（X 大写 + Tony 首字母大写）。
+# ★ 号名显示映射（陈少 2026-10-14/17）：封面/书名显示用规范名。
+#   XTony 目录 → 封面显示「XTony」（微博和 Twitter 封面已各自印平台名区分）。
 ACCOUNT_DISPLAY_MAP = {
+    "XTony": "XTony",
     "xtony": "XTony",
 }
 
