@@ -20,6 +20,21 @@ PY="/Users/jessper/.workbuddy/binaries/python/envs/default/bin/python"
 FACTORY="$HOME/Life/学习工厂"
 ENGINE="$FACTORY/02、文稿成品线/_engine"
 
+# ═══ 运行日志（每次双击全程落盘，问题排查直接读这个文件，不用再问陈少）═══
+# 日志路径：~/Life/学习工厂/02、文稿成品线/_engine/_command运行日志.log
+# 每次运行：打分隔线+时间戳；stdout+stderr 全量追加；终端窗口同步显示（tee）。
+RUN_LOG="$ENGINE/_command运行日志.log"
+# 只保留最近 800 行，防止日志无限膨胀
+if [ -f "$RUN_LOG" ]; then
+  tail -n 800 "$RUN_LOG" > "$RUN_LOG.tmp" 2>/dev/null && mv "$RUN_LOG.tmp" "$RUN_LOG"
+fi
+echo ""
+echo "════════════════════════════════════════════════════" >> "$RUN_LOG"
+echo "  运行开始　$(date '+%Y-%m-%d %H:%M:%S')　PID=$$" >> "$RUN_LOG"
+echo "════════════════════════════════════════════════════" >> "$RUN_LOG"
+# stdout+stderr 同时写日志 + 显示到终端（tee -a 追加，终端仍实时可见）
+exec > >(tee -a "$RUN_LOG") 2>&1
+
 # 进度上报辅助：写进 _进度.json 的某个板块（跨段共用）
 # 用法：report <板块key> <名称> <状态> <详情> [去向]
 report() {
