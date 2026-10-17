@@ -35,6 +35,7 @@ Sigil XHTML → 合订 EPUB（按公众号分本，按月分章）
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import hashlib
 import html
@@ -941,6 +942,162 @@ def build_all(account: str, book_dir: Path, split_year: bool = False) -> list[Pa
     return outs
 
 
+# ------------------------------------------------------------- 防误删（陈少 2026-10-18 定）
+# 核心逻辑：EPUB 可以多、不能少。重建时若发现「本次 xhtml 比上次成书时少了」，
+# 判定可能是误删——先从尚未被覆盖的旧 epub 里反解出减少的那几篇，存进
+# `<号>/_待处理/`（反解出的 xhtml + 一份清单），并在控制台/报告里醒目报错。
+# 快照 = 每次成书后落盘 `_上次成书清单.json`，记录当时每篇的（文件名、标题、日期）。
+
+SNAPSHOT_NAME = "_上次成书清单.json"
+PENDING_RECOVER_DIR = "_待处理"   # 下划线开头，collect_book_dirs 自动跳过
+
+
+def _snapshot_path(book_dir: Path) -> Path:
+    return book_dir / SNAPSHOT_NAME
+
+
+def _load_snapshot(book_dir: Path) -> dict[str, dict]:
+    """读上次成书清单：{文件名: {title, date, author}}。无快照返回空 dict。"""
+    sp = _snapshot_path(book_dir)
+    if not sp.exists():
+        return {}
+    try:
+        data = json.loads(sp.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_snapshot(book_dir: Path, files: list[Path]) -> None:
+    """成书后落盘快照：{文件名: {title, date, author}}。文件名做 key，稳定可对比。"""
+    snap: dict[str, dict] = {}
+    for p in files:
+        try:
+            art = parse_article(p)
+            snap[p.name] = {
+                "title": art.title if art else "",
+                "date": "%d-%d-%d" % art.date if (art and art.date) else "",
+                "author": art.author if art else "",
+            }
+        except Exception:
+            snap[p.name] = {"title": "", "date": "", "author": ""}
+    _snapshot_path(book_dir).write_text(
+        json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _recover_missing_xhtmls(book_dir: Path, out_path: Path,
+                            missing: dict[str, dict]) -> int:
+    """从旧 epub（out_path，尚未被覆盖）里反解出「减少的篇」，存进 `<号>/_待处理/`。
+
+    旧 epub 里每篇是一个 <section>，含 h2.article-title + p.article-meta + 正文。
+    按标题定位该 section，抠出正文重建成独立 xhtml；同时写一份清单。
+    返回恢复成功的篇数。
+    """
+    if not missing or not out_path.exists():
+        return 0
+    recovered = 0
+    pending_dir = book_dir / PENDING_RECOVER_DIR
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    # 标题 → 元信息（date/author），用于重建 xhtml 的标题行
+    by_title: dict[str, dict] = {}
+    for fname, meta in missing.items():
+        t = (meta.get("title") or "").strip()
+        if t:
+            by_title[t] = meta
+
+    try:
+        with zipfile.ZipFile(out_path, "r") as z:
+            part_names = [n for n in z.namelist()
+                          if n.startswith("OEBPS/Text/part") and n.endswith(".xhtml")]
+            for pn in part_names:
+                part_root = etree.fromstring(z.read(pn),
+                                             parser=etree.XMLParser(huge_tree=True))
+                for sec in part_root.iter(f"{{{XHTML_NS}}}section"):
+                    h2 = sec.find(f"{{{XHTML_NS}}}h2")
+                    if h2 is None:
+                        continue
+                    full_heading = "".join(h2.itertext()).strip()
+                    # 找匹配标题（h2 是「日期：标题」或纯标题）
+                    matched = None
+                    for t, meta in by_title.items():
+                        if full_heading.endswith(t) or full_heading == t:
+                            matched = (t, meta)
+                            break
+                    if not matched:
+                        continue
+                    title, meta = matched
+                    # 重建独立 xhtml
+                    doc = etree.Element(f"{{{XHTML_NS}}}html", nsmap=NSMAP)
+                    head = etree.SubElement(doc, f"{{{XHTML_NS}}}head")
+                    etree.SubElement(head, f"{{{XHTML_NS}}}title").text = title
+                    body = etree.SubElement(doc, f"{{{XHTML_NS}}}body")
+                    # 标题 h1 + 作者 meta + 正文节点
+                    h1 = etree.SubElement(body, f"{{{XHTML_NS}}}h1")
+                    h1.text = title
+                    if meta.get("author"):
+                        pm = etree.SubElement(body, f"{{{XHTML_NS}}}p",
+                                              attrib={"class": "article-meta"})
+                        pm.text = meta["author"]
+                    for child in sec:
+                        ln = lname(child)
+                        if ln in ("h2", "p") and child.get("class") == "article-meta":
+                            continue  # 标题和作者已在上面重建，跳过
+                        body.append(copy.deepcopy(child))
+                    safe = safe_stem(title) or "未命名"
+                    dest = pending_dir / (safe + ".xhtml")
+                    dest.write_bytes(etree.tostring(
+                        doc, encoding="utf-8", xml_declaration=True,
+                        doctype='<!DOCTYPE html>'))
+                    recovered += 1
+                    log("  ⚠️ 误删恢复：%s → %s/%s" % (title, PENDING_RECOVER_DIR, dest.name))
+                    by_title.pop(title, None)
+                    break
+    except Exception as exc:
+        log("  ⚠️ 反解旧 epub 失败（不影响重建）：%s" % exc)
+    return recovered
+
+
+def _guard_missing_xhtmls(book_dir: Path, out_path: Path, files: list[Path]) -> None:
+    """防误删主逻辑：对比「本次 xhtml」vs「上次成书快照」，发现减少 → 恢复 + 报错。
+
+    files = 本次扫到的全部 xhtml；out_path = 即将被覆盖写的旧 epub（覆盖前）。
+    """
+    snap = _load_snapshot(book_dir)
+    if not snap:
+        return  # 首次成书，无快照，无对比基准，跳过
+    now_names = {p.name for p in files}
+    prev_names = set(snap.keys())
+    missing_names = prev_names - now_names
+    if not missing_names:
+        return
+    missing = {n: snap[n] for n in missing_names}
+    # 从旧 epub 反解恢复
+    recovered = _recover_missing_xhtmls(book_dir, out_path, missing)
+    # 清单（「这几篇不见了」）
+    lines = [
+        "# 误删恢复清单",
+        "",
+        "生成时间：%s" % dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "以下 xhtml 在上次成书时存在，本次重建时**从 xhtml 目录里消失了**：",
+        "",
+    ]
+    for n, meta in sorted(missing.items()):
+        date = meta.get("date") or "无日期"
+        title = meta.get("title") or n
+        lines.append("- `%s`（%s · %s）" % (n, date, title))
+    lines += [
+        "",
+        "已从旧 epub 反解恢复 %d 篇到 `%s/`（若为有意删除，可手动清掉该目录）。"
+        % (recovered, PENDING_RECOVER_DIR),
+    ]
+    (book_dir / "_误删恢复清单.md").write_text("\n".join(lines), encoding="utf-8")
+    # 醒目报错
+    log("  ⚠️⚠️ 检测到 %d 篇 xhtml 减少（可能误删）：%s"
+        % (len(missing_names), "、".join(sorted(missing_names))))
+    log("       已从旧 epub 恢复 %d 篇到 %s/，清单见 _误删恢复清单.md"
+        % (recovered, PENDING_RECOVER_DIR))
+
+
 def build_book(account: str, book_dir: Path, year: int | None = None,
               month: str | None = None) -> Path | None:
     """book_dir 就是该号的独立文件夹；原始文档在 xhtml/ 里，产物写回文件夹根。
@@ -1090,6 +1247,10 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     ]
     spine_ids = []
 
+    # 防误删关卡（陈少 2026-10-18 定）：覆盖写旧 epub 之前，先对比快照，
+    # 若本次 xhtml 比上次少了 → 从旧 epub 反解恢复进 _待处理/ + 报错。
+    _guard_missing_xhtmls(book_dir, out_path, files)
+
     z = zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED)
     z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
     z.writestr("META-INF/container.xml",
@@ -1178,6 +1339,8 @@ def build_book(account: str, book_dir: Path, year: int | None = None,
     for month_key, label, group in months:
         log("      %s  %d 篇：%s" % (label, len(group),
                                      "、".join(a.title[:12] for a in group[:4]) + ("…" if len(group) > 4 else "")))
+    # 成书成功 → 落盘快照（防误删对比基准）
+    _save_snapshot(book_dir, files)
     return out_path
 
 
